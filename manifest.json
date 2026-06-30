@@ -1,0 +1,89 @@
+{
+  "manifest_version": 3,
+  "name": "GuJumpgate iCloud API",
+  "version": "0.1.3",
+  "version_name": "GuJumpgate iCloud API 0.1.3",
+  "description": "iCloud API 邮箱池 + Plus Checkout 转换代理流程",
+  "permissions": [
+    "sidePanel",
+    "alarms",
+    "tabs",
+    "webNavigation",
+    "webRequest",
+    "webRequestAuthProvider",
+    "proxy",
+    "declarativeNetRequest",
+    "debugger",
+    "browsingData",
+    "cookies",
+    "nativeMessaging",
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://open.feishu.cn/*",
+    "https://*.icloud.com/*",
+    "https://*.icloud.com.cn/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "icloud_headers",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://auth0.openai.com/*",
+        "https://auth.openai.com/*",
+        "https://accounts.openai.com/*"
+      ],
+      "js": [
+        "content/activation-utils.js",
+        "shared/source-registry.js",
+        "content/utils.js",
+        "content/operation-delay.js",
+        "content/auth-page-recovery.js",
+        "content/signup-page.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://pay.openai.com/*",
+        "https://checkout.stripe.com/*"
+      ],
+      "js": [
+        "content/activation-utils.js",
+        "shared/source-registry.js",
+        "content/utils.js",
+        "content/operation-delay.js",
+        "content/plus-checkout.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

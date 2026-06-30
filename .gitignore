@@ -1,0 +1,23 @@
+/docs/md
+
+/_metadata/
+.vscode
+
+/data/account-run-history.txt
+/data/account-run-history.json
+/data/*.sqlite3
+/data/*.sqlite3-shm
+/data/*.sqlite3-wal
+.npm-test.log
+.omx/
+/node_modules
+/.runtime
+/logs
+/docs/新步骤顺序
+__pycache__/
+*.pyc
+.worktrees/
+/release-artifacts/
+*.bak-*
+# Local exported runtime settings
+/config.json

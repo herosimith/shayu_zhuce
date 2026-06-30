@@ -1,0 +1,15 @@
+{
+  "name": "gujumpgate-icloud-api",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "external-redeem-proxy": "node tools/external-redeem-proxy.js",
+    "jp-proxy-bridge": "node tools/jp-proxy-bridge.js",
+    "multi-profile-runner": "node tools/multi-profile-runner.js",
+    "install-native-launcher": "node tools/install-native-launcher.js",
+    "debug:capture": "node tools/sw-console-capture.js"
+  },
+  "dependencies": {
+    "socks": "^2.8.9"
+  }
+}
