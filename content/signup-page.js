@@ -2854,7 +2854,7 @@ const OAUTH_CONSENT_FORM_SELECTOR = 'form[action*="/sign-in-with-chatgpt/" i][ac
 const CONTINUE_ACTION_PATTERN = /继续|continue/i;
 const ADD_PHONE_PAGE_PATTERN = /add[\s-]*(?:a\s+)?phone|添加(?:手机|手机号|电话号码)|绑定(?:手机|手机号|电话号码)|验证(?:你的|您)?(?:手机|手机号|电话号码)|需要(?:手机|手机号|电话号码)|提供(?:手机|手机号|电话号码)|provide\s+(?:a\s+)?phone\s+number|phone\s+number\s+(?:required|verification)|verify\s+(?:your\s+)?phone|confirm\s+(?:your\s+)?phone/i;
 const ADD_EMAIL_PAGE_PATTERN = /add[\s-]*email|添加(?:电子邮件|邮箱)|要求提供(?:电子邮件|邮箱)地址|提供(?:电子邮件|邮箱)地址|provide\s+(?:an?\s+)?email\s+address|email\s+address\s+required/i;
-const STEP5_SUBMIT_ERROR_PATTERN = /无法根据该信息创建帐户|请重试|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|something\s+went\s+wrong|invalid\s+(?:birthday|birth|date|age|name)|required|必填|姓名|全名|年龄|生日|出生日期/i;
+const STEP5_SUBMIT_ERROR_PATTERN = /无法根据该信息创建帐户|请重试|unable\s+to\s+create\s+(?:your\s+)?account|couldn'?t\s+create\s+(?:your\s+)?account|something\s+went\s+wrong|invalid\s+(?:birthday|birth|date|age|name)|required|必填|姓名|全名|年龄|生日|出生日期|出生年份|出生年月日/i;
 const AUTH_TIMEOUT_ERROR_TITLE_PATTERN = /糟糕，出错了|something\s+went\s+wrong|oops/i;
 const AUTH_TIMEOUT_ERROR_DETAIL_PATTERN = /operation\s+timed\s+out|timed\s+out|请求超时|操作超时|failed\s+to\s+fetch|network\s+error|fetch\s+failed/i;
 const AUTH_ROUTE_ERROR_PATTERN = /405\s+method\s+not\s+allowed|route\s+error.*405|did\s+not\s+provide\s+an?\s+[`'"]?action|post\s+request\s+to\s+["']?\/email-verification/i;
@@ -7005,6 +7005,199 @@ function getStep5SafeAgeValue(resolvedAge) {
   return String(ageNumber);
 }
 
+function getStep5FieldText(input) {
+  if (!input) {
+    return '';
+  }
+
+  const parts = [];
+  const push = (value) => {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (text) {
+      parts.push(text.slice(0, 240));
+    }
+  };
+
+  push(input.getAttribute?.('name'));
+  push(input.getAttribute?.('id'));
+  push(input.getAttribute?.('type'));
+  push(input.getAttribute?.('placeholder'));
+  push(input.getAttribute?.('aria-label'));
+  push(input.getAttribute?.('title'));
+  push(input.getAttribute?.('autocomplete'));
+  push(input.getAttribute?.('inputmode'));
+  push(input.getAttribute?.('min'));
+  push(input.getAttribute?.('max'));
+
+  const addTextById = (id) => {
+    if (!id) return;
+    const element = document.getElementById(id);
+    push(element?.textContent);
+  };
+
+  String(input.getAttribute?.('aria-labelledby') || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .forEach(addTextById);
+  String(input.getAttribute?.('aria-describedby') || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .forEach(addTextById);
+
+  const inputId = String(input.getAttribute?.('id') || '').trim();
+  if (inputId) {
+    const label = Array.from(document.querySelectorAll('label')).find((candidate) => (
+      String(candidate.getAttribute?.('for') || '') === inputId
+    ));
+    push(label?.textContent);
+  }
+
+  push(input.closest?.('label')?.textContent);
+  const form = input.form || input.closest?.('form');
+  String(form?.getAttribute?.('aria-labelledby') || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .forEach(addTextById);
+
+  let parent = input.parentElement;
+  for (let depth = 0; parent && depth < 4; depth += 1, parent = parent.parentElement) {
+    const label = parent.querySelector?.('label');
+    if (label) {
+      push(label.textContent);
+    }
+  }
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function getStep5NumericAttribute(input, attributeName) {
+  const rawValue = String(input?.getAttribute?.(attributeName) || '').trim();
+  if (!rawValue) {
+    return null;
+  }
+  const numberValue = Number(rawValue);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function isStep5BirthYearAgeInput(input) {
+  const descriptor = getStep5FieldText(input);
+  if (/出生年份|出生年|出生于哪一年|哪一年出生|birth\s*year|year\s*of\s*birth|what\s+year\s+were\s+you\s+born|born\s+in\s+which\s+year/i.test(descriptor)) {
+    return true;
+  }
+
+  const minValue = getStep5NumericAttribute(input, 'min');
+  const maxValue = getStep5NumericAttribute(input, 'max');
+  const currentYear = new Date().getFullYear();
+  const looksLikeYearRange = (
+    Number.isFinite(minValue)
+    && Number.isFinite(maxValue)
+    && minValue >= 1800
+    && maxValue >= 1900
+    && maxValue <= currentYear + 1
+  );
+
+  return String(input?.getAttribute?.('name') || '').trim().toLowerCase() === 'age' && looksLikeYearRange;
+}
+
+function isStep5BirthDateInput(input) {
+  if (!input) {
+    return false;
+  }
+  const type = String(input.getAttribute?.('type') || '').trim().toLowerCase();
+  if (type === 'hidden' || type === 'password' || type === 'email' || type === 'tel') {
+    return false;
+  }
+  const descriptor = getStep5FieldText(input);
+  if (/出生年月日|出生日期|生日|birth\s*date|date\s*of\s*birth|birthday/i.test(descriptor)) {
+    return true;
+  }
+  return type === 'date';
+}
+
+function getStep5BirthYearValue({ year, resolvedAge, currentValue = '', input = null } = {}) {
+  const currentYear = new Date().getFullYear();
+  const minValue = getStep5NumericAttribute(input, 'min') ?? 1900;
+  const maxValue = getStep5NumericAttribute(input, 'max') ?? currentYear;
+  const isValidYear = (value) => {
+    const numberValue = Math.floor(Number(value));
+    return (
+      Number.isFinite(numberValue)
+      && numberValue >= Math.max(1800, minValue)
+      && numberValue <= Math.min(currentYear, maxValue)
+    );
+  };
+
+  if (isValidYear(year)) {
+    return String(Math.floor(Number(year)));
+  }
+
+  const existingValue = String(currentValue || '').trim();
+  if (/^\d{4}$/.test(existingValue) && isValidYear(existingValue)) {
+    return existingValue;
+  }
+
+  const ageNumber = Math.floor(Number(resolvedAge));
+  if (Number.isFinite(ageNumber) && ageNumber >= 5 && ageNumber <= 130) {
+    const derivedYear = currentYear - ageNumber;
+    if (isValidYear(derivedYear)) {
+      return String(derivedYear);
+    }
+  }
+
+  const fallbackYear = currentYear - 21;
+  if (isValidYear(fallbackYear)) {
+    return String(fallbackYear);
+  }
+  return '';
+}
+
+function getStep5AgeInputValue(ageInput, options = {}) {
+  if (isStep5BirthYearAgeInput(ageInput)) {
+    return {
+      mode: 'birthYear',
+      value: getStep5BirthYearValue({
+        ...options,
+        currentValue: ageInput?.value,
+        input: ageInput,
+      }),
+    };
+  }
+
+  if (isStep5BirthDateInput(ageInput)) {
+    return {
+      mode: 'birthDate',
+      value: getStep5BirthdayDateValue({
+        ...options,
+        currentValue: ageInput?.value,
+      }),
+    };
+  }
+
+  return {
+    mode: 'age',
+    value: getStep5SafeAgeValue(options.resolvedAge),
+  };
+}
+
+function getStep5VisibleBirthdayDateInput(root = document) {
+  const directMatch = Array.from(root.querySelectorAll([
+    'input[name="birthday"]:not([type="hidden"])',
+    'input[name="birthdate"]',
+    'input[name="birthDate"]',
+    'input[type="date"]',
+    'input[placeholder*="出生日期"]',
+    'input[placeholder*="出生年月日"]',
+    'input[placeholder*="birthday" i]',
+    'input[aria-label*="birthday" i]',
+  ].join(', '))).find((input) => isVisibleElement(input)) || null;
+  if (directMatch) {
+    return directMatch;
+  }
+
+  return Array.from(root.querySelectorAll('input:not([type="hidden"])'))
+    .find((input) => isVisibleElement(input) && isStep5BirthDateInput(input)) || null;
+}
+
 function syncStep5AboutYouFields(options = {}) {
   const {
     button = null,
@@ -7020,11 +7213,13 @@ function syncStep5AboutYouFields(options = {}) {
   const nameInput = query('input[name="name"], input[placeholder*="全名"], input[autocomplete="name"]');
   const ageInput = query('input[name="age"]');
   const hiddenBirthday = query('input[name="birthday"]');
+  const visibleBirthdayDateInput = getStep5VisibleBirthdayDateInput(root);
   const explicitConsentInput = query('input[name="isExplicitConsentRequired"]');
 
   let nameSynced = false;
   let ageSynced = false;
   let birthdaySynced = false;
+  let ageFieldMode = '';
 
   if (nameInput && String(fullName || '').trim()) {
     if (isVisibleElement(nameInput)) {
@@ -7035,26 +7230,31 @@ function syncStep5AboutYouFields(options = {}) {
     nameSynced = true;
   }
 
-  const safeAgeValue = getStep5SafeAgeValue(resolvedAge);
-  if (ageInput && safeAgeValue) {
+  const ageField = ageInput ? getStep5AgeInputValue(ageInput, { resolvedAge, year, month, day }) : null;
+  ageFieldMode = ageField?.mode || '';
+  if (ageInput && ageField?.value) {
     if (isVisibleElement(ageInput)) {
-      fillInput(ageInput, safeAgeValue);
+      fillInput(ageInput, ageField.value);
     } else {
-      setStep5NativeInputValue(ageInput, safeAgeValue);
+      setStep5NativeInputValue(ageInput, ageField.value);
     }
     ageSynced = true;
   }
 
-  if (hiddenBirthday) {
-    const birthdayValue = getStep5BirthdayDateValue({
-      year,
-      month,
-      day,
-      resolvedAge: safeAgeValue || resolvedAge,
-      currentValue: hiddenBirthday.value,
-    });
-    if (birthdayValue) {
+  const birthdayValue = getStep5BirthdayDateValue({
+    year,
+    month,
+    day,
+    resolvedAge,
+    currentValue: hiddenBirthday?.value || visibleBirthdayDateInput?.value || '',
+  });
+  if (birthdayValue) {
+    if (hiddenBirthday) {
       setStep5NativeInputValue(hiddenBirthday, birthdayValue);
+      birthdaySynced = true;
+    }
+    if (visibleBirthdayDateInput) {
+      fillInput(visibleBirthdayDateInput, birthdayValue);
       birthdaySynced = true;
     }
   }
@@ -7070,7 +7270,9 @@ function syncStep5AboutYouFields(options = {}) {
     ageSynced,
     birthdaySynced,
     ageMode: Boolean(ageInput),
+    ageFieldMode,
     hiddenBirthdayPresent: Boolean(hiddenBirthday),
+    visibleBirthdayDatePresent: Boolean(visibleBirthdayDateInput),
     submitButtonText: button ? getActionText(button).slice(0, 80) : '',
   };
 }
@@ -7462,6 +7664,10 @@ function getStep5ProfileDiagnostics() {
     nameValuePresent: Boolean(String(nameInput?.value || '').trim()),
     ageInputVisible: Boolean(ageInput && isVisibleElement(ageInput)),
     ageValue: String(ageInput?.value || '').trim(),
+    ageFieldMode: ageInput ? getStep5AgeInputValue(ageInput, {}).mode : '',
+    agePlaceholder: String(ageInput?.getAttribute?.('placeholder') || '').slice(0, 80),
+    ageMin: String(ageInput?.getAttribute?.('min') || ''),
+    ageMax: String(ageInput?.getAttribute?.('max') || ''),
     birthdaySpinnersVisible: Boolean(
       yearSpinner && monthSpinner && daySpinner
       && isVisibleElement(yearSpinner)
@@ -7910,9 +8116,11 @@ async function step5_fillNameBirthdayOnce(payload) {
   let yearReactSelect = null;
   let monthReactSelect = null;
   let dayReactSelect = null;
+  let visibleBirthdayDateInput = null;
   let visibleAgeInput = false;
   let visibleBirthdaySpinners = false;
   let visibleBirthdaySelects = false;
+  let visibleBirthdayDate = false;
   let loggedWaitingForBirthdayFields = false;
 
   for (let i = 0; i < 100; i++) {
@@ -7951,6 +8159,7 @@ async function step5_fillNameBirthdayOnce(payload) {
     daySpinner = document.querySelector('[role="spinbutton"][data-type="day"]');
     hiddenBirthday = document.querySelector('input[name="birthday"]');
     ageInput = document.querySelector('input[name="age"]');
+    visibleBirthdayDateInput = getStep5VisibleBirthdayDateInput();
     yearReactSelect = findBirthdayReactAriaSelect('年');
     monthReactSelect = findBirthdayReactAriaSelect('月');
     dayReactSelect = findBirthdayReactAriaSelect('天');
@@ -7972,9 +8181,10 @@ async function step5_fillNameBirthdayOnce(payload) {
       && isVisibleElement(monthReactSelect.button)
       && isVisibleElement(dayReactSelect.button)
     );
+    visibleBirthdayDate = Boolean(visibleBirthdayDateInput && isVisibleElement(visibleBirthdayDateInput));
 
     if (visibleAgeInput) break;
-    if (visibleBirthdaySpinners || visibleBirthdaySelects) {
+    if (visibleBirthdaySpinners || visibleBirthdaySelects || visibleBirthdayDate) {
       birthdayMode = true;
       break;
     }
@@ -7999,6 +8209,20 @@ async function step5_fillNameBirthdayOnce(payload) {
     const yearReactSelect = findBirthdayReactAriaSelect('年');
     const monthReactSelect = findBirthdayReactAriaSelect('月');
     const dayReactSelect = findBirthdayReactAriaSelect('天');
+    const visibleBirthdayDateInput = getStep5VisibleBirthdayDateInput();
+
+    if (visibleBirthdayDateInput) {
+      const desiredDate = getStep5BirthdayDateValue({ year, month, day, resolvedAge });
+      if (!desiredDate) {
+        throw new Error('检测到出生日期输入框，但未能生成有效出生日期。');
+      }
+
+      await humanPause(450, 1100);
+      await performOperationWithDelay({ stepKey: 'fill-profile', kind: 'fill', label: 'fill-birthday-date' }, async () => {
+        fillInput(visibleBirthdayDateInput, desiredDate);
+      });
+      logStep5Action(`步骤 5：出生日期已填写：${desiredDate}`);
+    }
 
     if (yearReactSelect?.nativeSelect && monthReactSelect?.nativeSelect && dayReactSelect?.nativeSelect) {
       const desiredDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -8082,14 +8306,35 @@ async function step5_fillNameBirthdayOnce(payload) {
       logStep5Action(`步骤 5：已设置隐藏生日输入框：${dateStr}`);
     }
   } else if (ageInput) {
-    if (resolvedAge == null || Number.isNaN(Number(resolvedAge))) {
-      throw new Error('检测到年龄字段，但未提供年龄数据。');
+    const ageField = getStep5AgeInputValue(ageInput, { resolvedAge, year, month, day });
+    const ageFieldLabel = ageField.mode === 'birthYear'
+      ? '出生年份'
+      : ageField.mode === 'birthDate'
+        ? '出生日期'
+        : '年龄';
+    if (!ageField.value) {
+      throw new Error(`检测到${ageFieldLabel}字段，但未提供有效${ageFieldLabel}数据。`);
     }
     await humanPause(500, 1300);
     await performOperationWithDelay({ stepKey: 'fill-profile', kind: 'fill', label: 'fill-birthday' }, async () => {
-      fillInput(ageInput, String(resolvedAge));
+      fillInput(ageInput, ageField.value);
     });
-    logStep5Action(`步骤 5：年龄已填写：${resolvedAge}`);
+    logStep5Action(`步骤 5：${ageFieldLabel}已填写：${ageField.value}`);
+
+    const hiddenBirthday = document.querySelector('input[name="birthday"]');
+    const birthdayValue = getStep5BirthdayDateValue({
+      year,
+      month,
+      day,
+      resolvedAge,
+      currentValue: hiddenBirthday?.value || '',
+    });
+    if (hiddenBirthday && birthdayValue) {
+      await performOperationWithDelay({ stepKey: 'fill-profile', kind: 'hidden-sync', label: 'profile-birthday-hidden-sync' }, async () => {
+        setStep5NativeInputValue(hiddenBirthday, birthdayValue);
+      });
+      logStep5Action(`步骤 5：已同步隐藏生日输入框：${birthdayValue}`);
+    }
   } else {
     logStep5ProfileDiagnostics('步骤 5：未找到生日或年龄输入项，最终诊断快照', 'warn');
     throw new Error('未找到生日或年龄输入项。URL: ' + location.href);
@@ -8165,9 +8410,10 @@ async function step5_fillNameBirthdayOnce(payload) {
     throw new Error('未找到“完成帐户创建”按钮。URL: ' + location.href);
   }
 
+  const submitAgeFieldMode = ageInput ? getStep5AgeInputValue(ageInput, { resolvedAge, year, month, day }).mode : '';
   const isAgeMode = !birthdayMode && Boolean(ageInput);
   if (isAgeMode) {
-    logStep5Action('步骤 5：当前为年龄输入模式，点击“完成帐户创建”后将等待页面结果。', 'info');
+    logStep5Action(`步骤 5：当前为 ${submitAgeFieldMode || 'age'} 输入模式，点击“完成帐户创建”后将等待页面结果。`, 'info');
   }
   const syncProfileFields = () => syncStep5AboutYouFields({
     button: completeBtn,
@@ -8183,8 +8429,10 @@ async function step5_fillNameBirthdayOnce(payload) {
       `步骤 5：提交前已同步 about-you 表单字段：${JSON.stringify({
         formAction: initialSyncState.formAction || '',
         ageSynced: initialSyncState.ageSynced,
+        ageFieldMode: initialSyncState.ageFieldMode,
         birthdaySynced: initialSyncState.birthdaySynced,
         hiddenBirthdayPresent: initialSyncState.hiddenBirthdayPresent,
+        visibleBirthdayDatePresent: initialSyncState.visibleBirthdayDatePresent,
       })}`,
       'info'
     );
@@ -8214,6 +8462,7 @@ async function step5_fillNameBirthdayOnce(payload) {
             attempt,
             formAction: syncState.formAction || '',
             ageSynced: syncState.ageSynced,
+            ageFieldMode: syncState.ageFieldMode,
             birthdaySynced: syncState.birthdaySynced,
             nativeSubmitFallback: Boolean(retryOptions.nativeSubmitFallback),
           })}`,
