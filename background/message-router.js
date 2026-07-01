@@ -155,6 +155,7 @@
       syncMultiThreadRunnerLogs = null,
       startMultiThreadAutoRun = null,
       stopMultiThreadAutoRun = null,
+      clearMultiThreadWorkbench = null,
       AUTO_RUN_TIMER_KIND_SCHEDULED_START,
       notifyNodeComplete,
       notifyNodeError,
@@ -1490,6 +1491,13 @@
             throw new Error('多线程终止能力未接入。');
           }
           return await stopMultiThreadAutoRun(message.payload || {});
+        }
+
+        case 'CLEAR_MULTI_THREAD_WORKBENCH': {
+          if (typeof clearMultiThreadWorkbench !== 'function') {
+            throw new Error('多线程信息清空能力未接入。');
+          }
+          return await clearMultiThreadWorkbench(message.payload || {});
         }
 
         case 'SCHEDULE_AUTO_RUN': {

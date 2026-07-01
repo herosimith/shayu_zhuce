@@ -27,6 +27,7 @@
     ensureLocalServices: document.getElementById('btn-ensure-local-services'),
     startMultiThread: document.getElementById('btn-start-multi-thread'),
     stopMultiThread: document.getElementById('btn-stop-multi-thread'),
+    clearMultiThreadInfo: document.getElementById('btn-clear-multi-thread-info'),
     stop: document.getElementById('btn-stop'),
     reset: document.getElementById('btn-reset'),
     refresh: document.getElementById('btn-refresh'),
@@ -1040,6 +1041,14 @@
       || plans.some((plan) => String(plan?.status || '').trim().toLowerCase() === 'running');
   }
 
+  function hasMultiThreadWorkbenchHistory(view = state) {
+    const plans = Array.isArray(view?.multiThreadPlans) ? view.multiThreadPlans : [];
+    const threadLogs = view?.multiThreadLogs && typeof view.multiThreadLogs === 'object'
+      ? view.multiThreadLogs
+      : {};
+    return Boolean(plans.length || Object.keys(threadLogs).length || String(view?.multiThreadLastError || '').trim());
+  }
+
   function stopMultiThreadLogSync() {
     if (multiThreadSyncTimer) {
       clearInterval(multiThreadSyncTimer);
@@ -1276,6 +1285,9 @@
       els.threadCount.value = String(threadCount);
     }
     const plans = Array.isArray(state?.multiThreadPlans) ? state.multiThreadPlans : [];
+    const threadLogs = state?.multiThreadLogs && typeof state.multiThreadLogs === 'object'
+      ? state.multiThreadLogs
+      : {};
     const blockedReason = String(state?.multiThreadLastError || '').trim();
     const readyCount = plans.filter((plan) => String(plan?.status || '').toLowerCase() === 'ready').length;
     const runningCount = plans.filter((plan) => String(plan?.status || '').toLowerCase() === 'running').length;
@@ -1291,6 +1303,9 @@
     if (els.stopMultiThread) {
       els.stopMultiThread.disabled = !taskActive;
       els.stopMultiThread.textContent = taskActive ? '终止任务' : '已停止';
+    }
+    if (els.clearMultiThreadInfo) {
+      els.clearMultiThreadInfo.disabled = taskActive || !hasMultiThreadWorkbenchHistory(state);
     }
 
     if (!plans.length) {
@@ -1315,9 +1330,6 @@
       }).join('');
     }
 
-    const threadLogs = state?.multiThreadLogs && typeof state.multiThreadLogs === 'object'
-      ? state.multiThreadLogs
-      : {};
     const columnIds = plans.length
       ? plans.map((plan) => String(plan?.id || '').trim()).filter(Boolean)
       : Array.from({ length: threadCount }, (_, index) => `thread-${index + 1}`);
@@ -2245,6 +2257,43 @@
     }
   }
 
+  async function clearMultiThreadInfo() {
+    if (hasRunningMultiThreadPlans()) {
+      showToast('请先终止多线程任务，再清空线程信息', 'error', 7000);
+      return;
+    }
+    const button = els.clearMultiThreadInfo;
+    const originalText = button?.textContent || '清空线程信息';
+    if (button) {
+      button.disabled = true;
+      button.textContent = '清空中...';
+    }
+    try {
+      const response = await sendMessageWithWindow({
+        type: 'CLEAR_MULTI_THREAD_WORKBENCH',
+        source: 'sidepanel',
+        payload: {},
+      }, 20000);
+      stopMultiThreadLogSync();
+      if (response?.state) {
+        state = response.state;
+        renderState();
+      } else {
+        await loadState();
+      }
+      if (response?.ok === false) {
+        showToast(response.error || response.message || '清空线程信息失败', 'error', 7000);
+        return;
+      }
+      showToast('已清空线程信息', 'success');
+    } finally {
+      if (button) {
+        button.textContent = originalText;
+        button.disabled = hasRunningMultiThreadPlans() || !hasMultiThreadWorkbenchHistory();
+      }
+    }
+  }
+
   async function stopFlow() {
     const shouldStopMultiThread = hasRunningMultiThreadPlans();
     await sendMessage({ type: 'STOP_FLOW', source: 'sidepanel' }, 15000);
@@ -2527,6 +2576,11 @@
   if (els.stopMultiThread) {
     els.stopMultiThread.addEventListener('click', () => {
       stopMultiThreadTask().catch((error) => showToast(error.message || '多线程终止失败', 'error', 9000));
+    });
+  }
+  if (els.clearMultiThreadInfo) {
+    els.clearMultiThreadInfo.addEventListener('click', () => {
+      clearMultiThreadInfo().catch((error) => showToast(error.message || '清空线程信息失败', 'error', 7000));
     });
   }
   els.stop.addEventListener('click', () => {

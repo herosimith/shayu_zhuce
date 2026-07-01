@@ -1030,10 +1030,41 @@
       };
     }
 
+    async function clearMultiThreadWorkbench() {
+      const state = await getState();
+      const plans = Array.isArray(state?.multiThreadPlans) ? state.multiThreadPlans : [];
+      const hasActiveRunner = String(state?.multiThreadMode || '') === 'isolated-profile-runner'
+        && Boolean(String(state?.multiThreadRunnerRunId || '').trim());
+      const hasRunningPlan = plans.some((plan) => String(plan?.status || '').toLowerCase() === 'running');
+      if (hasActiveRunner || hasRunningPlan) {
+        return {
+          ok: false,
+          message: '当前多线程任务仍在运行，请先终止任务后再清空线程信息。',
+          state,
+        };
+      }
+      const updates = {
+        multiThreadMode: 'workbench',
+        multiThreadRunnerRunId: '',
+        multiThreadPlans: [],
+        multiThreadLogs: {},
+        multiThreadLastError: '',
+        multiThreadLastUpdatedAt: Date.now(),
+      };
+      await setState(updates);
+      broadcastDataUpdate(updates);
+      await addLog('多线程工作台：已清空线程信息展示。', 'ok');
+      return {
+        ok: true,
+        state: { ...state, ...updates },
+      };
+    }
+
     return {
       addThreadLog,
       getAvailableCdkeys,
       getUnusedEmailEntries,
+      clearMultiThreadWorkbench,
       ensureLocalServicesForWorkbench,
       normalizeThreadCount,
       prepareMultiThreadWorkbench,

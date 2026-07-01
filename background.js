@@ -16617,6 +16617,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   syncMultiThreadRunnerLogs: (...args) => multiThreadWorkbench?.syncMultiThreadRunnerLogs?.(...args),
   startMultiThreadAutoRun: (...args) => multiThreadWorkbench?.startMultiThreadAutoRun?.(...args),
   stopMultiThreadAutoRun: (...args) => multiThreadWorkbench?.stopMultiThreadAutoRun?.(...args),
+  clearMultiThreadWorkbench: (...args) => multiThreadWorkbench?.clearMultiThreadWorkbench?.(...args),
   AUTO_RUN_TIMER_KIND_SCHEDULED_START,
   notifyNodeComplete,
   notifyNodeError,
