@@ -15928,6 +15928,14 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
         break;
       }
 
+      if (isExternalRedeemQualifiedFailureError(err)) {
+        await addLog(
+          `节点 ${getNodeLabel(nodeId, latestState)}：检测到当前邮箱已因 AC/外部兑换失败标记不可再用，交给自动运行切换下一个未用邮箱。原因：${getExternalRedeemQualifiedFailureMessage(err)}`,
+          'warn'
+        );
+        throw err;
+      }
+
       const restartDecision = await getPostStep6AutoRestartDecision(step, err);
       if (restartDecision.shouldRestart) {
         postStep7RestartCount += 1;
@@ -17032,6 +17040,16 @@ async function getPostStep6AutoRestartDecision(step, error) {
 
   const normalizedStep = Number(step);
   const errorMessage = getErrorMessage(error);
+  if (isExternalRedeemQualifiedFailureError(error)) {
+    return {
+      shouldRestart: false,
+      blockedByAddPhone: false,
+      forcedByPhoneVerificationTimeout: false,
+      restartStep: FINAL_OAUTH_CHAIN_START_STEP,
+      errorMessage,
+      authState: null,
+    };
+  }
   const shouldForceRestartFromStep7 = /restart step 7 with a new number/i.test(errorMessage);
   const latestState = await getState();
   const authChainStartStep = typeof getAuthChainStartStepId === 'function'
