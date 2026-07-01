@@ -1322,7 +1322,6 @@
             </div>
             <div class="pool-meta mono">${htmlEscape(plan?.email || plan?.reason || '等待分配邮箱')}</div>
             <div class="pool-meta">CDK：${htmlEscape(plan?.cdkey ? '已分配' : '未分配')}</div>
-            <div class="pool-meta">代理：${htmlEscape(plan?.proxyDisplay || '未配置')}</div>
             ${plan?.runner ? `<div class="pool-meta mono">debug ${htmlEscape(plan.runner.debugPort || '-')} / bridge ${htmlEscape(plan.runner.proxyBridgePort || '-')}</div>` : ''}
             ${plan?.runnerSnapshot ? `<div class="pool-meta mono">当前：${htmlEscape(plan.runnerSnapshot.currentNodeId || plan.runnerSnapshot.autoRunPhase || '-')}${plan.runnerSnapshot.url ? ` / ${htmlEscape(plan.runnerSnapshot.url)}` : ''}</div>` : ''}
           </div>
@@ -1355,7 +1354,6 @@
             <strong>${htmlEscape(plan?.label || `线程 ${index + 1}`)}</strong>
             <span>${htmlEscape(plan?.email || '未分配')}</span>
           </div>
-          ${plan?.proxyDisplay ? `<div class="pool-meta mono">${htmlEscape(plan.proxyDisplay)}</div>` : ''}
           ${plan?.runnerSnapshot ? `
             <div class="pool-meta mono">节点：${htmlEscape(plan.runnerSnapshot.currentNodeId || plan.runnerSnapshot.autoRunPhase || '-')}</div>
             <div class="pool-meta mono">页面：${htmlEscape(plan.runnerSnapshot.title || '-')}${plan.runnerSnapshot.url ? ` / ${htmlEscape(plan.runnerSnapshot.url)}` : ''}</div>

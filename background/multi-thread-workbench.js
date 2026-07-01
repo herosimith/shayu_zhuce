@@ -17,8 +17,6 @@
       getState = async () => ({}),
       normalizeExternalRedeemCdkey = (value = '') => String(value || '').trim(),
       normalizeExternalRedeemCdkeyPoolText = (value = '') => String(value || '').trim(),
-      getCheckoutConversionProxyPoolEntries = () => [],
-      normalizeCheckoutConversionProxyInput = (value = '') => String(value || '').trim(),
       ensureLocalServices = null,
       readExternalRedeemRecordsFromSqlite = null,
       setPersistentSettings = async () => {},
@@ -40,22 +38,6 @@
 
     function getThreadLabel(index) {
       return `线程 ${index + 1}`;
-    }
-
-    function getProxyDisplayName(proxyUrl = '') {
-      const normalized = normalizeCheckoutConversionProxyInput(proxyUrl);
-      if (!normalized) {
-        return '';
-      }
-      try {
-        const parsed = new URL(normalized);
-        const protocol = String(parsed.protocol || '').replace(/:$/g, '').toLowerCase() || 'proxy';
-        const host = String(parsed.hostname || '').trim();
-        const port = String(parsed.port || '').trim();
-        return port ? `${protocol}://${host}:${port}` : `${protocol}://${host}`;
-      } catch {
-        return '已配置代理';
-      }
     }
 
     function getUnusedEmailEntries(state = {}) {
@@ -237,22 +219,10 @@
       });
     }
 
-    function getAvailableProxyPool(state = {}) {
-      const entries = typeof getCheckoutConversionProxyPoolEntries === 'function'
-        ? getCheckoutConversionProxyPoolEntries(state)
-        : [];
-      if (Array.isArray(entries) && entries.length) {
-        return entries.map((entry) => normalizeCheckoutConversionProxyInput(entry)).filter(Boolean);
-      }
-      const single = normalizeCheckoutConversionProxyInput(state?.plusCheckoutConversionProxyUrl || '');
-      return single ? [single] : [];
-    }
-
     function buildThreadPlans(state = {}, threadCount = DEFAULT_THREAD_COUNT) {
       const count = normalizeThreadCount(threadCount);
       const emails = getUnusedEmailEntries(state);
       const cdkeys = getAvailableCdkeys(state);
-      const proxies = getAvailableProxyPool(state);
       return Array.from({ length: count }, (_, index) => {
         const emailEntry = emails[index] || null;
         const emailPoolEntries = emails
@@ -271,7 +241,6 @@
           }))
           .filter((entry) => entry.email);
         const cdkey = cdkeys[index] || '';
-        const proxyUrl = proxies.length ? proxies[index % proxies.length] : '';
         return {
           id: `thread-${index + 1}`,
           index,
@@ -282,8 +251,8 @@
           raw: String(emailEntry?.raw || emailEntry?.email || ''),
           emailPoolEntries,
           cdkey,
-          proxyUrl,
-          proxyDisplay: getProxyDisplayName(proxyUrl),
+          proxyUrl: '',
+          proxyDisplay: '',
           windowId: null,
           startedAt: 0,
           updatedAt: Date.now(),
@@ -425,7 +394,6 @@
           raw: plan.raw,
           emailPoolEntries: Array.isArray(plan.emailPoolEntries) ? plan.emailPoolEntries : [],
           cdkey: plan.cdkey,
-          proxyUrl: plan.proxyUrl,
         })),
       };
       const response = await fetch(`${runnerUrl}${PROFILE_RUNNER_START_PATH}`, {
@@ -574,7 +542,6 @@
         const existing = existingById.get(id) || {};
         const snapshot = thread?.snapshot && typeof thread.snapshot === 'object' ? thread.snapshot : null;
         const email = normalizeEmail(snapshot?.email || thread?.email || existing.email || '');
-        const proxyDisplay = existing.proxyDisplay || getProxyDisplayName(thread?.proxyUrl || existing.proxyUrl || '');
         return {
           ...existing,
           id,
@@ -583,7 +550,8 @@
           status: String(thread?.status || existing.status || '').trim().toLowerCase() || 'running',
           email,
           cdkey: String(thread?.cdkey || existing.cdkey || ''),
-          proxyDisplay,
+          proxyUrl: '',
+          proxyDisplay: '',
           runner: {
             ...(existing.runner && typeof existing.runner === 'object' ? existing.runner : {}),
             debugPort: Number(thread?.debugPort) || Number(existing.runner?.debugPort) || 0,
@@ -852,13 +820,12 @@
         await addThreadLog(
           plan.id,
           plan.email
-            ? `已分配 ${plan.email}${plan.cdkey ? ' 和一个 CDK' : '，暂无可用 CDK'}${plan.proxyDisplay ? `，代理 ${plan.proxyDisplay}` : '，未配置独立代理'}。`
+            ? `已分配 ${plan.email}${plan.cdkey ? ' 和一个 CDK' : '，暂无可用 CDK'}。`
             : plan.reason,
           plan.status === 'ready' ? 'ok' : 'warn',
           {
             email: plan.email,
             hasCdkey: Boolean(plan.cdkey),
-            proxyDisplay: plan.proxyDisplay,
           }
         );
       }
