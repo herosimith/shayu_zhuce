@@ -521,6 +521,7 @@ const DEFAULT_ICLOUD_API_EMAIL = 'chortle_palmate.3c@icloud.com';
 const DEFAULT_ICLOUD_API_VERIFICATION_URL = 'http://icloudapi.xyz/show/AhobCgIfCgYMBBdfSERSIxsGGAQQHUMaHAhZExcDD0gQARwBSBoTCwNGDAoBEw==/chortle_palmate.3c@icloud.com';
 const ICLOUD_API_MODE_NORMAL = 'normal';
 const ICLOUD_API_MODE_TAOBAO = 'taobao';
+const ICLOUD_API_MODE_HOTMAIL = 'hotmail';
 const DEFAULT_ICLOUD_API_EMAIL_POOL_ENTRY = Object.freeze({
   id: 'icloudapi-default-chortle-palmate-3c',
   email: DEFAULT_ICLOUD_API_EMAIL,
@@ -2349,7 +2350,7 @@ function normalizeCustomEmailPool(value = []) {
 function parseEmailWithOptionalVerificationUrl(value = '') {
   const rawValue = String(value || '').trim();
   if (!rawValue) {
-    return { email: '', verificationUrl: '', queryCode: '', apiMode: ICLOUD_API_MODE_NORMAL };
+    return { email: '', verificationUrl: '', queryCode: '', apiMode: ICLOUD_API_MODE_NORMAL, password: '', clientId: '', refreshToken: '' };
   }
 
   const parts = rawValue.split('----');
@@ -2358,7 +2359,17 @@ function parseEmailWithOptionalVerificationUrl(value = '') {
   let verificationUrl = '';
   let queryCode = '';
   let apiMode = ICLOUD_API_MODE_NORMAL;
+  let password = '';
+  let clientId = '';
+  let refreshToken = '';
   if (credential) {
+    const hotmailParts = credential.split('----').map((part) => String(part || '').trim());
+    if (hotmailParts.length >= 3 && hotmailParts[1] && hotmailParts.slice(2).join('----').trim()) {
+      password = hotmailParts[0] || '';
+      clientId = hotmailParts[1] || '';
+      refreshToken = hotmailParts.slice(2).join('----').trim();
+      apiMode = ICLOUD_API_MODE_HOTMAIL;
+    } else {
     try {
       const parsed = new URL(credential);
       verificationUrl = ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : '';
@@ -2375,6 +2386,7 @@ function parseEmailWithOptionalVerificationUrl(value = '') {
         apiMode = ICLOUD_API_MODE_TAOBAO;
       }
     }
+    }
   }
 
   return {
@@ -2382,6 +2394,9 @@ function parseEmailWithOptionalVerificationUrl(value = '') {
     verificationUrl,
     queryCode,
     apiMode,
+    password,
+    clientId,
+    refreshToken,
   };
 }
 
@@ -2399,9 +2414,11 @@ function normalizeVerificationUrlValue(value = '') {
 }
 
 function normalizeIcloudApiModeValue(value = '') {
-  return String(value || '').trim().toLowerCase() === ICLOUD_API_MODE_TAOBAO
-    ? ICLOUD_API_MODE_TAOBAO
-    : ICLOUD_API_MODE_NORMAL;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === ICLOUD_API_MODE_HOTMAIL || normalized === 'outlook' || normalized === 'microsoft') {
+    return ICLOUD_API_MODE_HOTMAIL;
+  }
+  return normalized === ICLOUD_API_MODE_TAOBAO ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL;
 }
 
 function normalizeCustomEmailPoolEntryObjects(value = []) {
@@ -2422,10 +2439,18 @@ function normalizeCustomEmailPoolEntryObjects(value = []) {
       || parsedEntry.verificationUrl
       || ''
     );
-    const queryCode = String(asObject.queryCode || asObject.pwd || asObject.password || parsedEntry.queryCode || '').trim();
-    const apiMode = queryCode
+    const password = String(asObject.password || parsedEntry.password || '').trim();
+    const clientId = String(asObject.clientId || asObject.client_id || parsedEntry.clientId || '').trim();
+    const refreshToken = String(asObject.refreshToken || asObject.refresh_token || asObject.token || parsedEntry.refreshToken || '').trim();
+    const hasHotmailCredential = Boolean(clientId && refreshToken);
+    const queryCode = hasHotmailCredential
+      ? ''
+      : String(asObject.queryCode || asObject.pwd || parsedEntry.queryCode || '').trim();
+    const apiMode = hasHotmailCredential
+      ? ICLOUD_API_MODE_HOTMAIL
+      : (queryCode
       ? ICLOUD_API_MODE_TAOBAO
-      : normalizeIcloudApiModeValue(asObject.apiMode || parsedEntry.apiMode || ICLOUD_API_MODE_NORMAL);
+      : normalizeIcloudApiModeValue(asObject.apiMode || parsedEntry.apiMode || ICLOUD_API_MODE_NORMAL));
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       continue;
     }
@@ -2440,8 +2465,11 @@ function normalizeCustomEmailPoolEntryObjects(value = []) {
       used: Boolean(asObject.used),
       note: String(asObject.note || '').trim(),
       apiMode,
-      queryCode,
-      verificationUrl,
+      queryCode: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : queryCode,
+      password: apiMode === ICLOUD_API_MODE_HOTMAIL ? password : '',
+      clientId: apiMode === ICLOUD_API_MODE_HOTMAIL ? clientId : '',
+      refreshToken: apiMode === ICLOUD_API_MODE_HOTMAIL ? refreshToken : '',
+      verificationUrl: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : verificationUrl,
       lastUsedAt: Number.isFinite(Number(asObject.lastUsedAt)) ? Number(asObject.lastUsedAt) : 0,
       lastError: String(asObject.lastError || '').trim(),
       accessTokenCheck: asObject.accessTokenCheck && typeof asObject.accessTokenCheck === 'object'

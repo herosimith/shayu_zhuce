@@ -236,6 +236,9 @@
             note: String(entry?.note || ''),
             apiMode: String(entry?.apiMode || '').trim(),
             queryCode: String(entry?.queryCode || entry?.pwd || '').trim(),
+            password: String(entry?.password || '').trim(),
+            clientId: String(entry?.clientId || entry?.client_id || '').trim(),
+            refreshToken: String(entry?.refreshToken || entry?.refresh_token || entry?.token || '').trim(),
             verificationUrl: String(entry?.verificationUrl || entry?.url || entry?.mailUrl || '').trim(),
             lastUsedAt: Number(entry?.lastUsedAt) || 0,
           }))
@@ -310,7 +313,8 @@
       const attemptsDone = Math.max(0, Number(status.attemptsDone) || 0);
       const maxAttempts = Math.max(0, Number(status.maxAttempts) || 0);
       const attemptText = maxAttempts ? `第 ${attemptsDone}/${maxAttempts} 次` : '轮询中';
-      const mode = String(status.apiMode || '').trim() === 'taobao' ? '淘宝版' : '普通版';
+      const apiMode = String(status.apiMode || '').trim().toLowerCase();
+      const mode = apiMode === 'hotmail' ? 'Hotmail' : (apiMode === 'taobao' ? '淘宝版' : '普通版');
       const phaseText = formatVerificationPhase(status.phase);
       const lastError = String(status.lastError || '').trim();
       return `取码状态：${mode} iCloud API ${attemptText}，${phaseText}${lastError ? `；最后错误：${lastError}` : ''}`;

@@ -105,13 +105,28 @@ function parseEmailPoolLine(value = '') {
       verificationUrl: '',
       queryCode: '',
       apiMode: '',
+      password: '',
+      clientId: '',
+      refreshToken: '',
     };
   }
   const parts = raw.split('----');
   const email = normalizeString(parts.length > 1 ? parts.shift() : raw).toLowerCase();
   const credential = normalizeString(parts.length > 0 ? parts.join('----') : '');
   if (!credential) {
-    return { email, verificationUrl: '', queryCode: '', apiMode: '' };
+    return { email, verificationUrl: '', queryCode: '', apiMode: '', password: '', clientId: '', refreshToken: '' };
+  }
+  const hotmailParts = credential.split('----').map((part) => normalizeString(part));
+  if (hotmailParts.length >= 3 && hotmailParts[1] && hotmailParts.slice(2).join('----')) {
+    return {
+      email,
+      verificationUrl: '',
+      queryCode: '',
+      apiMode: 'hotmail',
+      password: hotmailParts[0] || '',
+      clientId: hotmailParts[1] || '',
+      refreshToken: hotmailParts.slice(2).join('----'),
+    };
   }
   if (isHttpUrl(credential)) {
     try {
@@ -125,9 +140,12 @@ function parseEmailPoolLine(value = '') {
         verificationUrl: parsed.toString(),
         queryCode,
         apiMode: queryCode ? 'taobao' : '',
+        password: '',
+        clientId: '',
+        refreshToken: '',
       };
     } catch {
-      return { email, verificationUrl: credential, queryCode: '', apiMode: '' };
+      return { email, verificationUrl: credential, queryCode: '', apiMode: '', password: '', clientId: '', refreshToken: '' };
     }
   }
   return {
@@ -135,6 +153,9 @@ function parseEmailPoolLine(value = '') {
     verificationUrl: buildTaobaoVerificationUrl(email, credential),
     queryCode: credential,
     apiMode: 'taobao',
+    password: '',
+    clientId: '',
+    refreshToken: '',
   };
 }
 
@@ -791,14 +812,18 @@ function buildThreadSettings(baseSettings = {}, thread = {}) {
       const parsedLine = parseEmailPoolLine(rawLine);
       const entryEmail = normalizeString(entry?.email || parsedLine.email || (index === 0 ? email : '')).toLowerCase();
       if (!entryEmail) return null;
-      const queryCode = normalizeString(entry?.queryCode || entry?.pwd || parsedLine.queryCode || '');
-      const apiMode = queryCode ? 'taobao' : normalizeString(entry?.apiMode || parsedLine.apiMode || baseSettings?.icloudApiMode || '');
+      const clientId = normalizeString(entry?.clientId || entry?.client_id || parsedLine.clientId || '');
+      const refreshToken = normalizeString(entry?.refreshToken || entry?.refresh_token || entry?.token || parsedLine.refreshToken || '');
+      const password = normalizeString(entry?.password || parsedLine.password || '');
+      const hasHotmailCredential = Boolean(clientId && refreshToken);
+      const queryCode = hasHotmailCredential ? '' : normalizeString(entry?.queryCode || entry?.pwd || parsedLine.queryCode || '');
+      const apiMode = hasHotmailCredential ? 'hotmail' : (queryCode ? 'taobao' : normalizeString(entry?.apiMode || parsedLine.apiMode || baseSettings?.icloudApiMode || ''));
       const verificationUrl = normalizeString(
-        entry?.verificationUrl
+        apiMode === 'hotmail' ? '' : (entry?.verificationUrl
         || entry?.url
         || entry?.mailUrl
         || parsedLine.verificationUrl
-        || (apiMode === 'taobao' && queryCode ? buildTaobaoVerificationUrl(entryEmail, queryCode) : '')
+        || (apiMode === 'taobao' && queryCode ? buildTaobaoVerificationUrl(entryEmail, queryCode) : ''))
       );
       return {
         id: normalizeString(entry?.id) || `runner-${thread.id}-${index + 1}`,
@@ -809,6 +834,9 @@ function buildThreadSettings(baseSettings = {}, thread = {}) {
         note: normalizeString(entry?.note || ''),
         apiMode,
         queryCode,
+        password: apiMode === 'hotmail' ? password : '',
+        clientId: apiMode === 'hotmail' ? clientId : '',
+        refreshToken: apiMode === 'hotmail' ? refreshToken : '',
         verificationUrl,
         lastUsedAt: Number(entry?.lastUsedAt) || 0,
       };
@@ -820,6 +848,7 @@ function buildThreadSettings(baseSettings = {}, thread = {}) {
       const parsedLine = parseEmailPoolLine(thread.raw || email);
       const entryEmail = normalizeString(parsedLine.email || email).toLowerCase();
       if (!entryEmail) return [];
+      const fallbackHasHotmail = Boolean(parsedLine.clientId && parsedLine.refreshToken);
       return [{
         id: thread.emailEntryId || `runner-${thread.id}`,
         email: entryEmail,
@@ -827,9 +856,12 @@ function buildThreadSettings(baseSettings = {}, thread = {}) {
         enabled: true,
         used: false,
         note: '',
-        apiMode: parsedLine.queryCode ? 'taobao' : normalizeString(baseSettings?.icloudApiMode || parsedLine.apiMode || ''),
-        queryCode: parsedLine.queryCode,
-        verificationUrl: parsedLine.verificationUrl,
+        apiMode: fallbackHasHotmail ? 'hotmail' : (parsedLine.queryCode ? 'taobao' : normalizeString(baseSettings?.icloudApiMode || parsedLine.apiMode || '')),
+        queryCode: fallbackHasHotmail ? '' : parsedLine.queryCode,
+        password: fallbackHasHotmail ? parsedLine.password : '',
+        clientId: fallbackHasHotmail ? parsedLine.clientId : '',
+        refreshToken: fallbackHasHotmail ? parsedLine.refreshToken : '',
+        verificationUrl: fallbackHasHotmail ? '' : parsedLine.verificationUrl,
         lastUsedAt: 0,
       }];
     })();
