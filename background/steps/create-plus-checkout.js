@@ -644,9 +644,18 @@ function FindProxyForURL(url, host) {
       let snapshot = null;
 
       try {
+        if (typeof resetIpProxyAuthDiagnostics === 'function') {
+          resetIpProxyAuthDiagnostics();
+        }
+        if (typeof resetIpProxyRuntimeErrorDiagnostics === 'function') {
+          resetIpProxyRuntimeErrorDiagnostics();
+        }
         snapshot = await applyProxy(proxyUrl, {
           targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
         });
+        if (typeof clearIpProxyNetworkState === 'function') {
+          await clearIpProxyNetworkState().catch(() => null);
+        }
 
         let exit = null;
         if (typeof detectProxyExitInfoByBackgroundFetch === 'function') {
@@ -660,6 +669,23 @@ function FindProxyForURL(url, host) {
             probeDiagnostics.push(`probe:background:${error?.message || error}`);
             return { ip: '', region: '', source: 'background_unavailable', endpoint: '' };
           });
+        }
+        if (!String(exit?.ip || '').trim() && typeof appendIpProxyAuthDiagnosticsToErrors === 'function') {
+          appendIpProxyAuthDiagnosticsToErrors(probeDiagnostics);
+        }
+        if (!String(exit?.ip || '').trim() && typeof detectProxyExitInfoByPageContext === 'function') {
+          probeDiagnostics.push('probe:bg:fallback_page_context');
+          exit = await detectProxyExitInfoByPageContext({
+            timeoutMs: 12000,
+            errors: probeDiagnostics,
+            probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
+          }).catch((error) => {
+            probeDiagnostics.push(`probe:page_context:fallback:${error?.message || error}`);
+            return exit || { ip: '', region: '', source: 'page_context_unavailable', endpoint: '' };
+          });
+        }
+        if (!String(exit?.ip || '').trim() && typeof appendIpProxyRuntimeErrorDiagnosticsToErrors === 'function') {
+          appendIpProxyRuntimeErrorDiagnosticsToErrors(probeDiagnostics, 45000);
         }
         const exitIp = String(exit?.ip || '').trim();
         const exitRegion = String(exit?.region || '').trim();
