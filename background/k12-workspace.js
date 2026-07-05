@@ -411,11 +411,17 @@
       broadcastDataUpdate,
       readChatGptAccessTokenInfo,
       readCurrentChatGptSessionForExport,
+      addK12WorkspaceLog,
     } = deps;
+    const log = typeof addK12WorkspaceLog === 'function'
+      ? addK12WorkspaceLog
+      : async () => {};
     const state = typeof getState === 'function' ? await getState() : {};
     const workspaceId = normalizeString(options?.workspaceId || state?.k12WorkspaceId || DEFAULT_WORKSPACE_ID) || DEFAULT_WORKSPACE_ID;
     let accessToken = extractAccessToken(options?.accessToken || options?.token || '');
+    await log(`准备执行 Workspace invite，Workspace ID：${workspaceId}。`, 'info', { phase: 'k12-redeem' });
     if (!accessToken && options?.useCurrent !== false) {
+      await log('未传入 access_token，正在读取当前 ChatGPT 会话 AC。', 'info', { phase: 'read-ac' });
       if (typeof readCurrentChatGptSessionForExport === 'function') {
         const sessionState = await readCurrentChatGptSessionForExport({}).catch((error) => {
           throw new Error(`读取当前 ChatGPT AC 失败：${error?.message || error}`);
@@ -427,24 +433,65 @@
         });
         accessToken = extractAccessToken(tokenInfo?.accessToken || '');
       }
+    } else if (accessToken) {
+      await log('已使用输入的 access_token，准备校验 JWT。', 'info', { phase: 'read-ac' });
     }
     if (!accessToken) {
+      await log('缺少 access_token，无法执行 K12 Workspace。', 'error', { phase: 'read-ac' });
       throw new Error('请先粘贴 access_token，或打开 ChatGPT 后点击“使用当前 AC”。');
     }
     if (accessToken.split('.').length !== 3) {
+      await log('access_token 不是 JWT 三段式，已停止。', 'error', { phase: 'read-ac' });
       throw new Error('access_token 格式错误，应为 JWT 三段式。');
     }
     const tokenInfo = decodeAccessTokenInfo(accessToken);
     if (tokenInfo?.expiresAt && tokenInfo.expiresAt < Date.now()) {
+      await log('access_token 已过期，已停止。', 'error', {
+        phase: 'read-ac',
+        email: tokenInfo.email,
+      });
       throw new Error('access_token 已过期，请重新同步当前 ChatGPT AC。');
     }
+    await log(`AC 校验通过，账号 ${tokenInfo.email || '未知邮箱'}，准备发送 request。`, 'info', {
+      phase: 'request',
+      email: tokenInfo.email,
+    });
 
-    const requestResult = await sendWorkspaceInvite(accessToken, workspaceId, 'request');
+    let requestResult = null;
+    try {
+      requestResult = await sendWorkspaceInvite(accessToken, workspaceId, 'request');
+    } catch (error) {
+      await log(`Workspace request 请求异常：${error?.message || error}`, 'error', {
+        phase: 'request',
+        email: tokenInfo.email,
+      });
+      throw error;
+    }
+    await log(`Workspace request 返回 HTTP ${requestResult.status || 0}${requestResult.ok ? '，成功。' : '，将尝试 accept fallback。'}`, requestResult.ok ? 'ok' : 'warn', {
+      phase: 'request',
+      email: tokenInfo.email,
+    });
     let finalResult = requestResult;
     let acceptResult = null;
     if (!requestResult.ok) {
-      acceptResult = await sendWorkspaceInvite(accessToken, workspaceId, 'accept');
+      await log('request 未成功，开始发送 accept fallback。', 'warn', {
+        phase: 'accept',
+        email: tokenInfo.email,
+      });
+      try {
+        acceptResult = await sendWorkspaceInvite(accessToken, workspaceId, 'accept');
+      } catch (error) {
+        await log(`Workspace accept 请求异常：${error?.message || error}`, 'error', {
+          phase: 'accept',
+          email: tokenInfo.email,
+        });
+        throw error;
+      }
       finalResult = acceptResult;
+      await log(`Workspace accept 返回 HTTP ${acceptResult.status || 0}${acceptResult.ok ? '，成功。' : '，仍失败。'}`, acceptResult.ok ? 'ok' : 'error', {
+        phase: 'accept',
+        email: tokenInfo.email,
+      });
     }
 
     const message = finalResult.ok
@@ -474,6 +521,10 @@
     if (typeof broadcastDataUpdate === 'function') {
       broadcastDataUpdate(updates);
     }
+    await log(`${tokenInfo.email || '未知邮箱'} 的 K12 结果已写入历史：${message}。`, finalResult.ok ? 'ok' : 'error', {
+      phase: 'history',
+      email: tokenInfo.email,
+    });
     return {
       ok: finalResult.ok,
       workspaceId,

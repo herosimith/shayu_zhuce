@@ -1062,6 +1062,7 @@ const DEFAULT_STATE = {
   externalRedeemRecordsLastError: '',
   k12WorkspaceLastResult: null,
   k12WorkspaceHistory: [],
+  k12WorkspaceLogs: [],
   k12WorkspaceAutoRunning: false,
   k12WorkspaceAutoStatus: 'idle',
   k12WorkspaceRunActive: false,
@@ -12208,6 +12209,33 @@ async function addLog(message, level = 'info', options = {}) {
   chrome.runtime.sendMessage({ type: 'LOG_ENTRY', payload: entry }).catch(() => { });
 }
 
+function sanitizeK12WorkspaceLogMessage(message = '') {
+  return String(message || '')
+    .replace(/\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g, '[access_token]')
+    .replace(/((?:access|refresh|id)_?token|authorization|password|client_?secret|api_?key)\s*[:=]\s*["']?[^,\s"'，。;；]+/gi, '$1=[redacted]')
+    .replace(/(Bearer\s+)[a-zA-Z0-9._-]+/gi, '$1[redacted]')
+    .slice(0, 800);
+}
+
+async function addK12WorkspaceLog(message, level = 'info', options = {}) {
+  const timestamp = Date.now();
+  const entry = {
+    id: `${timestamp}-${Math.random().toString(16).slice(2)}`,
+    message: sanitizeK12WorkspaceLogMessage(message),
+    level: String(level || 'info').toLowerCase(),
+    timestamp,
+    phase: String(options?.phase || '').trim(),
+    email: String(options?.email || '').trim(),
+  };
+  const state = await getState();
+  const logs = Array.isArray(state?.k12WorkspaceLogs) ? state.k12WorkspaceLogs.slice() : [];
+  logs.push(entry);
+  if (logs.length > 300) logs.splice(0, logs.length - 300);
+  await setState({ k12WorkspaceLogs: logs });
+  broadcastDataUpdate({ k12WorkspaceLogs: logs });
+  return entry;
+}
+
 function getStep8CallbackUrlFromNavigation(details, signupTabId) {
   if (typeof navigationUtils !== 'undefined' && navigationUtils?.getStep8CallbackUrlFromNavigation) {
     return navigationUtils.getStep8CallbackUrlFromNavigation(details, signupTabId);
@@ -16751,8 +16779,16 @@ async function runK12WorkspaceAutoRegister(options = {}) {
   });
 
   await addLog(`K12 自动注册：已选择 ${selectedEntry.email}，开始注册并准备回填 AC。`, 'info');
+  await addK12WorkspaceLog(`已选择 ${selectedEntry.email}，模式 ${pool.mode || ICLOUD_API_MODE_NORMAL}，准备注册并执行 Workspace ${workspaceId}。`, 'info', {
+    phase: 'auto-register',
+    email: selectedEntry.email,
+  });
 
   try {
+    await addK12WorkspaceLog('开始打开 ChatGPT 并执行注册流程。', 'info', {
+      phase: 'auto-register',
+      email: selectedEntry.email,
+    });
     await runAutoSequenceFromNode('open-chatgpt', {
       targetRun: 1,
       totalRuns: 1,
@@ -16761,6 +16797,10 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       skipCheckoutConversionProxy: true,
     });
 
+    await addK12WorkspaceLog('注册流程返回，正在读取当前 ChatGPT AC。', 'info', {
+      phase: 'read-ac',
+      email: selectedEntry.email,
+    });
     const sessionState = await readCurrentChatGptSessionForExport({}).catch((error) => {
       throw new Error(`K12 自动注册已完成但读取 AC 失败：${error?.message || error}`);
     });
@@ -16773,6 +16813,10 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       k12WorkspaceAccessTokenUpdatedAt: Date.now(),
     });
     await addLog(`K12 自动注册：已读取 ${selectedEntry.email} 的 AC，并写入 K12 access_token 输入框。`, 'ok');
+    await addK12WorkspaceLog('已读取 AC 并写入 K12 access_token 输入框，开始调用 Workspace invite。', 'ok', {
+      phase: 'read-ac',
+      email: selectedEntry.email,
+    });
 
     const redeemResult = await k12Module.runK12WorkspaceRedeem({
       getState,
@@ -16780,6 +16824,7 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       broadcastDataUpdate,
       readChatGptAccessTokenInfo,
       readCurrentChatGptSessionForExport,
+      addK12WorkspaceLog,
     }, {
       workspaceId,
       accessToken,
@@ -16804,6 +16849,10 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       k12WorkspaceAutoLastError: '',
     });
     await addLog(`K12 自动注册：${selectedEntry.email} 已完成注册并执行 K12，邮箱已标记为已用。`, 'ok');
+    await addK12WorkspaceLog(`${selectedEntry.email} 已完成 K12 invite，邮箱已标记为已用。`, 'ok', {
+      phase: 'completed',
+      email: selectedEntry.email,
+    });
     finalStatus = 'completed';
     successPayload = {
       ok: true,
@@ -16828,6 +16877,10 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       k12WorkspaceAutoLastError: message,
     });
     await addLog(`K12 自动注册失败：${message}`, 'error');
+    await addK12WorkspaceLog(`自动注册失败：${message}`, 'error', {
+      phase: 'failed',
+      email: selectedEntry.email,
+    });
     throw error;
   } finally {
     autoRunActive = false;
@@ -16844,6 +16897,7 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       k12WorkspaceAutoStatus: finalStatus,
       k12WorkspaceLastResult: latest.k12WorkspaceLastResult || null,
       k12WorkspaceHistory: Array.isArray(latest.k12WorkspaceHistory) ? latest.k12WorkspaceHistory : [],
+      k12WorkspaceLogs: Array.isArray(latest.k12WorkspaceLogs) ? latest.k12WorkspaceLogs : [],
       k12WorkspaceAccessTokenDraft: latest.k12WorkspaceAccessTokenDraft || '',
       k12WorkspaceAccessTokenUpdatedAt: Number(latest.k12WorkspaceAccessTokenUpdatedAt) || 0,
       k12WorkspaceAutoLastEmail: latest.k12WorkspaceAutoLastEmail || selectedEntry.email,
@@ -16861,6 +16915,7 @@ async function runK12WorkspaceAutoRegister(options = {}) {
       k12WorkspaceAutoStatus: finalStatus,
       k12WorkspaceLastResult: restored.k12WorkspaceLastResult || null,
       k12WorkspaceHistory: restored.k12WorkspaceHistory || [],
+      k12WorkspaceLogs: restored.k12WorkspaceLogs || [],
       k12WorkspaceAccessTokenDraft: restored.k12WorkspaceAccessTokenDraft || '',
       k12WorkspaceAccessTokenUpdatedAt: restored.k12WorkspaceAccessTokenUpdatedAt || 0,
       k12WorkspaceAutoLastEmail: restored.k12WorkspaceAutoLastEmail || '',
@@ -16956,6 +17011,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
     broadcastDataUpdate,
     readChatGptAccessTokenInfo,
     readCurrentChatGptSessionForExport,
+    addK12WorkspaceLog,
   }, options),
   runK12WorkspaceAutoRegister: (options) => runK12WorkspaceAutoRegister(options),
   clearK12WorkspaceHistory: () => self.GuJumpgateK12Workspace?.clearK12WorkspaceHistory?.({

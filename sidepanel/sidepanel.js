@@ -66,6 +66,8 @@
     runK12CurrentAc: document.getElementById('btn-run-k12-current-ac'),
     runK12Token: document.getElementById('btn-run-k12-token'),
     clearK12History: document.getElementById('btn-clear-k12-history'),
+    k12WorkspaceLogsSummary: document.getElementById('k12-workspace-logs-summary'),
+    k12WorkspaceLogs: document.getElementById('k12-workspace-logs'),
     k12WorkspaceHistory: document.getElementById('k12-workspace-history'),
     feishuSyncEnabled: document.getElementById('input-feishu-sync-enabled'),
     feishuAppId: document.getElementById('input-feishu-app-id'),
@@ -568,6 +570,12 @@
   function getK12WorkspaceHistory() {
     return Array.isArray(state?.k12WorkspaceHistory)
       ? state.k12WorkspaceHistory.filter((item) => item && typeof item === 'object')
+      : [];
+  }
+
+  function getK12WorkspaceLogs() {
+    return Array.isArray(state?.k12WorkspaceLogs)
+      ? state.k12WorkspaceLogs.filter((item) => item && typeof item === 'object')
       : [];
   }
 
@@ -1865,6 +1873,27 @@
         : (last
       ? `${getK12WorkspaceStatusLabel(last)} / ${formatDateTime(last.updatedAt)}`
           : (history.length ? `${history.length} 条历史` : '未执行')));
+
+    const k12Logs = getK12WorkspaceLogs().slice(-120).reverse();
+    if (els.k12WorkspaceLogsSummary) {
+      els.k12WorkspaceLogsSummary.textContent = k12Logs.length ? `最近 ${k12Logs.length} 条` : '最近 0 条';
+    }
+    if (els.k12WorkspaceLogs) {
+      els.k12WorkspaceLogs.innerHTML = k12Logs.length
+        ? k12Logs.map((entry) => {
+          const date = new Date(Number(entry.timestamp) || Number(entry.time) || Date.now());
+          const time = date.toLocaleTimeString('zh-CN', { hour12: false });
+          const level = String(entry.level || 'info').toLowerCase();
+          const phase = String(entry.phase || '').trim();
+          return `
+            <div class="log-item ${htmlEscape(level)}">
+              <div class="log-time">${htmlEscape(time)}${phase ? ` / ${htmlEscape(phase)}` : ''}</div>
+              <div class="log-message">${htmlEscape(entry.message || '')}</div>
+            </div>
+          `;
+        }).join('')
+        : '<div class="log-item">暂无 K12 日志</div>';
+    }
 
     if (!history.length) {
       els.k12WorkspaceHistory.innerHTML = '<div class="redeem-item">暂无 K12 记录</div>';
