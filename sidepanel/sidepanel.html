@@ -119,12 +119,16 @@
           <input id="input-k12-api-mode-hotmail" name="k12-api-mode" type="radio" value="hotmail">
           <span>Hotmail</span>
         </label>
+        <label>
+          <input id="input-k12-api-mode-outlook" name="k12-api-mode" type="radio" value="outlook-api">
+          <span>Outlook API</span>
+        </label>
       </div>
-      <div id="k12-pool-format-hint" class="pool-meta">普通版：每行 邮箱----完整接口URL；淘宝版：邮箱----邮件查询码；Hotmail：邮箱----密码----client_id----refresh_token</div>
+      <div id="k12-pool-format-hint" class="pool-meta">普通版：每行 邮箱----完整接口URL；淘宝版：邮箱----邮件查询码；Hotmail：邮箱----密码----client_id----refresh_token；Outlook API：邮箱----密码</div>
       <label class="field">
         <span>K12 邮箱池</span>
         <textarea id="input-k12-email-pool" spellcheck="false"
-          placeholder="邮箱----接口URL / 查询码 / 密码----client_id----refresh_token"></textarea>
+          placeholder="邮箱----接口URL / 查询码 / 密码----client_id----refresh_token / Outlook密码"></textarea>
       </label>
       <div class="panel-title compact">
         <h2>K12 邮箱池状态</h2>

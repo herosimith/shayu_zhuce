@@ -526,6 +526,8 @@ const DEFAULT_ICLOUD_API_VERIFICATION_URL = 'http://icloudapi.xyz/show/AhobCgIfC
 const ICLOUD_API_MODE_NORMAL = 'normal';
 const ICLOUD_API_MODE_TAOBAO = 'taobao';
 const ICLOUD_API_MODE_HOTMAIL = 'hotmail';
+const ICLOUD_API_MODE_OUTLOOK_API = 'outlook-api';
+const OUTLOOK_API_BASE_URL = 'http://query.paopaodw.com/boobar?email=';
 const DEFAULT_ICLOUD_API_EMAIL_POOL_ENTRY = Object.freeze({
   id: 'icloudapi-default-chortle-palmate-3c',
   email: DEFAULT_ICLOUD_API_EMAIL,
@@ -2433,9 +2435,21 @@ function normalizeVerificationUrlValue(value = '') {
   }
 }
 
+function buildOutlookApiVerificationUrl(email = '', password = '') {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedPassword = String(password || '').trim();
+  if (!normalizedEmail || !normalizedPassword) {
+    return '';
+  }
+  return `${OUTLOOK_API_BASE_URL}${normalizedEmail}----${normalizedPassword}`;
+}
+
 function normalizeIcloudApiModeValue(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === ICLOUD_API_MODE_HOTMAIL || normalized === 'outlook' || normalized === 'microsoft') {
+  if (normalized === ICLOUD_API_MODE_OUTLOOK_API || normalized === 'paopaodw' || normalized === 'outlook_http') {
+    return ICLOUD_API_MODE_OUTLOOK_API;
+  }
+  if (normalized === ICLOUD_API_MODE_HOTMAIL || normalized === 'hotmail' || normalized === 'outlook' || normalized === 'microsoft' || normalized === 'graph') {
     return ICLOUD_API_MODE_HOTMAIL;
   }
   return normalized === ICLOUD_API_MODE_TAOBAO ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL;
@@ -2452,13 +2466,6 @@ function normalizeCustomEmailPoolEntryObjects(value = []) {
       : { email: rawEntry };
     const parsedEntry = parseEmailWithOptionalVerificationUrl(asObject.email || '');
     const email = parsedEntry.email;
-    const verificationUrl = normalizeVerificationUrlValue(
-      asObject.verificationUrl
-      || asObject.url
-      || asObject.mailUrl
-      || parsedEntry.verificationUrl
-      || ''
-    );
     const password = String(asObject.password || parsedEntry.password || '').trim();
     const clientId = String(asObject.clientId || asObject.client_id || parsedEntry.clientId || '').trim();
     const refreshToken = String(asObject.refreshToken || asObject.refresh_token || asObject.token || parsedEntry.refreshToken || '').trim();
@@ -2466,11 +2473,19 @@ function normalizeCustomEmailPoolEntryObjects(value = []) {
     const queryCode = hasHotmailCredential
       ? ''
       : String(asObject.queryCode || asObject.pwd || parsedEntry.queryCode || '').trim();
-    const apiMode = hasHotmailCredential
+    const apiMode = normalizeIcloudApiModeValue(hasHotmailCredential
       ? ICLOUD_API_MODE_HOTMAIL
       : (queryCode
       ? ICLOUD_API_MODE_TAOBAO
-      : normalizeIcloudApiModeValue(asObject.apiMode || parsedEntry.apiMode || ICLOUD_API_MODE_NORMAL));
+      : (asObject.apiMode || parsedEntry.apiMode || ICLOUD_API_MODE_NORMAL)));
+    const verificationUrl = normalizeVerificationUrlValue(
+      asObject.verificationUrl
+      || asObject.url
+      || asObject.mailUrl
+      || parsedEntry.verificationUrl
+      || (apiMode === ICLOUD_API_MODE_OUTLOOK_API && password ? buildOutlookApiVerificationUrl(email, password) : '')
+      || ''
+    );
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       continue;
     }
@@ -2486,7 +2501,7 @@ function normalizeCustomEmailPoolEntryObjects(value = []) {
       note: String(asObject.note || '').trim(),
       apiMode,
       queryCode: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : queryCode,
-      password: apiMode === ICLOUD_API_MODE_HOTMAIL ? password : '',
+      password: apiMode === ICLOUD_API_MODE_HOTMAIL || apiMode === ICLOUD_API_MODE_OUTLOOK_API ? password : '',
       clientId: apiMode === ICLOUD_API_MODE_HOTMAIL ? clientId : '',
       refreshToken: apiMode === ICLOUD_API_MODE_HOTMAIL ? refreshToken : '',
       verificationUrl: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : verificationUrl,

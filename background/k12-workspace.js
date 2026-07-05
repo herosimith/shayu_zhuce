@@ -7,7 +7,9 @@
   const ICLOUD_API_MODE_NORMAL = 'normal';
   const ICLOUD_API_MODE_TAOBAO = 'taobao';
   const ICLOUD_API_MODE_HOTMAIL = 'hotmail';
+  const ICLOUD_API_MODE_OUTLOOK_API = 'outlook-api';
   const TAOBAO_FEED_API_URL = 'https://assurivo.com/console/feed.php';
+  const OUTLOOK_API_BASE_URL = 'http://query.paopaodw.com/boobar?email=';
 
   function normalizeString(value = '') {
     return String(value || '').trim();
@@ -36,7 +38,10 @@
 
   function normalizeApiMode(value = '') {
     const normalized = normalizeString(value).toLowerCase();
-    if (normalized === ICLOUD_API_MODE_HOTMAIL || normalized === 'outlook' || normalized === 'microsoft') {
+    if (normalized === ICLOUD_API_MODE_OUTLOOK_API || normalized === 'outlook-api' || normalized === 'paopaodw' || normalized === 'outlook_http') {
+      return ICLOUD_API_MODE_OUTLOOK_API;
+    }
+    if (normalized === ICLOUD_API_MODE_HOTMAIL || normalized === 'hotmail' || normalized === 'outlook' || normalized === 'microsoft' || normalized === 'graph') {
       return ICLOUD_API_MODE_HOTMAIL;
     }
     return normalized === ICLOUD_API_MODE_TAOBAO ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL;
@@ -64,6 +69,15 @@
     return `${TAOBAO_FEED_API_URL}?${params.toString()}`;
   }
 
+  function buildOutlookApiVerificationUrl(email = '', password = '') {
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPassword = normalizeString(password);
+    if (!normalizedEmail || !normalizedPassword) {
+      return '';
+    }
+    return `${OUTLOOK_API_BASE_URL}${normalizedEmail}----${normalizedPassword}`;
+  }
+
   function makeEntryId(email = '', index = 0) {
     const safeEmail = normalizeEmail(email).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     return `k12-pool-${safeEmail || 'entry'}-${index + 1}`;
@@ -83,6 +97,16 @@
       if (clientId && refreshToken) {
         return { apiMode: ICLOUD_API_MODE_HOTMAIL, verificationUrl: '', queryCode: '', password, clientId, refreshToken };
       }
+    }
+    if (normalizedMode === ICLOUD_API_MODE_OUTLOOK_API) {
+      return {
+        apiMode: ICLOUD_API_MODE_OUTLOOK_API,
+        verificationUrl: buildOutlookApiVerificationUrl(email, credential),
+        queryCode: '',
+        password: credential,
+        clientId: '',
+        refreshToken: '',
+      };
     }
     const verificationUrl = normalizeUrl(credential);
     if (verificationUrl) {
@@ -132,9 +156,10 @@
       const clientId = normalizeString(entry.clientId || entry.client_id || parsedCredential.clientId || '');
       const refreshToken = normalizeString(entry.refreshToken || entry.refresh_token || entry.token || parsedCredential.refreshToken || '');
       const hasHotmailCredential = Boolean(clientId && refreshToken);
+      const outlookPassword = normalizeString(entry.outlookPassword || entry.outlook_password || parsedCredential.password || '');
       const apiMode = hasHotmailCredential
         ? ICLOUD_API_MODE_HOTMAIL
-        : normalizeApiMode(entry.apiMode || parsedCredential.apiMode || mode);
+        : normalizeApiMode(entry.apiMode || (mode !== ICLOUD_API_MODE_NORMAL ? mode : '') || parsedCredential.apiMode || mode);
       const queryCode = apiMode === ICLOUD_API_MODE_HOTMAIL
         ? ''
         : normalizeString(entry.queryCode || entry.pwd || parsedCredential.queryCode || '');
@@ -145,6 +170,7 @@
           || entry.url
           || entry.mailUrl
           || parsedCredential.verificationUrl
+          || (apiMode === ICLOUD_API_MODE_OUTLOOK_API && outlookPassword ? buildOutlookApiVerificationUrl(email, outlookPassword) : '')
           || (apiMode === ICLOUD_API_MODE_TAOBAO && queryCode ? buildTaobaoVerificationUrl(email, queryCode) : '')
         );
       if (!isEmail(email) || seen.has(email)) {
@@ -156,10 +182,10 @@
         email,
         enabled: entry.enabled !== undefined ? Boolean(entry.enabled) : true,
         used: Boolean(entry.used),
-        note: normalizeString(entry.note || (apiMode === ICLOUD_API_MODE_HOTMAIL ? 'Hotmail' : (apiMode === ICLOUD_API_MODE_TAOBAO ? '淘宝版' : (verificationUrl ? 'iCloud API' : '')))),
+        note: normalizeString(entry.note || (apiMode === ICLOUD_API_MODE_HOTMAIL ? 'Hotmail' : (apiMode === ICLOUD_API_MODE_OUTLOOK_API ? 'Outlook API' : (apiMode === ICLOUD_API_MODE_TAOBAO ? '淘宝版' : (verificationUrl ? 'iCloud API' : ''))))),
         apiMode,
         queryCode: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : queryCode,
-        password: apiMode === ICLOUD_API_MODE_HOTMAIL ? normalizeString(entry.password || parsedCredential.password || '') : '',
+        password: apiMode === ICLOUD_API_MODE_HOTMAIL || apiMode === ICLOUD_API_MODE_OUTLOOK_API ? normalizeString(entry.password || parsedCredential.password || outlookPassword || '') : '',
         clientId: apiMode === ICLOUD_API_MODE_HOTMAIL ? clientId : '',
         refreshToken: apiMode === ICLOUD_API_MODE_HOTMAIL ? refreshToken : '',
         verificationUrl,
@@ -184,7 +210,7 @@
       let source = line;
       if (!line.includes('----') && isEmail(line)) {
         const next = normalizeString(lines[index + 1] || '');
-        if (next && (normalizeUrl(next) || isTaobaoQueryCode(next))) {
+        if (next && (normalizeUrl(next) || isTaobaoQueryCode(next) || mode === ICLOUD_API_MODE_OUTLOOK_API)) {
           source = `${line}----${next}`;
           index += 1;
         }
@@ -212,6 +238,9 @@
     return normalizeK12EmailPoolEntries(entries).map((entry) => {
       if (entry.apiMode === ICLOUD_API_MODE_HOTMAIL) {
         return `${entry.email}----${entry.password || ''}----${entry.clientId || ''}----${entry.refreshToken || ''}`;
+      }
+      if (entry.apiMode === ICLOUD_API_MODE_OUTLOOK_API) {
+        return `${entry.email}----${entry.password || ''}`;
       }
       if (entry.apiMode === ICLOUD_API_MODE_TAOBAO && entry.queryCode) {
         return `${entry.email}----${entry.queryCode}`;
