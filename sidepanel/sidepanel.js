@@ -10,6 +10,7 @@
   const TAOBAO_FEED_API_URL = 'https://assurivo.com/console/feed.php';
   const CUSTOM_POOL_GENERATOR = 'custom-pool';
   const EXTERNAL_REDEEM_DEFAULT_BASE_URL = 'https://chong.nerver.cc';
+  const K12_DEFAULT_WORKSPACE_ID = '631e1603-06cf-4f0b-b79b-d09fbfcfe98d';
   const EXTERNAL_REDEEM_TERMINAL_STATUSES = new Set(['success', 'failed', 'timeout', 'cancelled', 'rejected', 'not_found', 'submit_failed']);
   const MULTI_THREAD_SYNC_INTERVAL_MS = 3000;
   const DEFAULT_FEISHU_SYNC_CONFIG = {
@@ -21,6 +22,9 @@
   };
 
   const els = {
+    mainWorkspaceTab: document.getElementById('tab-main-workspace'),
+    k12WorkspaceTab: document.getElementById('tab-k12-workspace'),
+    tabPanels: Array.from(document.querySelectorAll('[data-panel-tab]')),
     runCount: document.getElementById('input-run-count'),
     threadCount: document.getElementById('input-thread-count'),
     autoRun: document.getElementById('btn-auto-run'),
@@ -45,6 +49,13 @@
     syncChatgptAc: document.getElementById('btn-sync-chatgpt-ac'),
     viewChatgptAc: document.getElementById('btn-view-chatgpt-ac'),
     exportChatgptAc: document.getElementById('btn-export-chatgpt-ac'),
+    k12WorkspaceStatus: document.getElementById('k12-workspace-status'),
+    k12WorkspaceId: document.getElementById('input-k12-workspace-id'),
+    k12AccessToken: document.getElementById('input-k12-access-token'),
+    runK12CurrentAc: document.getElementById('btn-run-k12-current-ac'),
+    runK12Token: document.getElementById('btn-run-k12-token'),
+    clearK12History: document.getElementById('btn-clear-k12-history'),
+    k12WorkspaceHistory: document.getElementById('k12-workspace-history'),
     feishuSyncEnabled: document.getElementById('input-feishu-sync-enabled'),
     feishuAppId: document.getElementById('input-feishu-app-id'),
     feishuAppSecret: document.getElementById('input-feishu-app-secret'),
@@ -115,10 +126,12 @@
   let autoRunStarting = false;
   let chatgptAcExpanded = false;
   let loginSecurityConfigDirty = false;
+  let k12ConfigDirty = false;
   let externalRedeemConfigDirty = false;
   let feishuConfigDirty = false;
   let multiThreadSyncTimer = 0;
   let multiThreadSyncInFlight = false;
+  let activeWorkspaceTab = 'main';
   const fullAccessTokenByEmail = new Map();
 
   function htmlEscape(value = '') {
@@ -128,6 +141,21 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function setWorkspaceTab(tab = 'main') {
+    activeWorkspaceTab = tab === 'k12' ? 'k12' : 'main';
+    if (els.mainWorkspaceTab) {
+      els.mainWorkspaceTab.classList.toggle('active', activeWorkspaceTab === 'main');
+      els.mainWorkspaceTab.setAttribute('aria-selected', activeWorkspaceTab === 'main' ? 'true' : 'false');
+    }
+    if (els.k12WorkspaceTab) {
+      els.k12WorkspaceTab.classList.toggle('active', activeWorkspaceTab === 'k12');
+      els.k12WorkspaceTab.setAttribute('aria-selected', activeWorkspaceTab === 'k12' ? 'true' : 'false');
+    }
+    els.tabPanels.forEach((panel) => {
+      panel.hidden = String(panel.dataset.panelTab || 'main') !== activeWorkspaceTab;
+    });
   }
 
   function showToast(message, level = 'info', timeoutMs = 3600) {
@@ -474,6 +502,12 @@
   function getExternalRedeemRecords() {
     return Array.isArray(state?.externalRedeemRecords)
       ? state.externalRedeemRecords.filter((item) => item && typeof item === 'object')
+      : [];
+  }
+
+  function getK12WorkspaceHistory() {
+    return Array.isArray(state?.k12WorkspaceHistory)
+      ? state.k12WorkspaceHistory.filter((item) => item && typeof item === 'object')
       : [];
   }
 
@@ -1047,6 +1081,7 @@
       plusCheckoutConversionProxyPoolIndex: Math.max(0, Math.floor(Number(state?.plusCheckoutConversionProxyPoolIndex) || 0)),
       externalRedeemEnabled: Boolean(els.externalRedeemEnabled.checked),
       chatgptTotpAutoEnable: Boolean(els.chatgptTotpAutoEnable?.checked),
+      k12WorkspaceId: String(els.k12WorkspaceId?.value || '').trim() || K12_DEFAULT_WORKSPACE_ID,
       externalRedeemBaseUrl: normalizeUrl(els.externalRedeemBaseUrl.value) || EXTERNAL_REDEEM_DEFAULT_BASE_URL,
       externalRedeemApiKey: String(els.externalRedeemApiKey.value || '').trim(),
       externalRedeemCdkeyPoolText: normalizeExternalRedeemCdkeyPoolText(els.externalRedeemCdkeys.value),
@@ -1098,6 +1133,7 @@
       };
     }
     loginSecurityConfigDirty = false;
+    k12ConfigDirty = false;
     externalRedeemConfigDirty = false;
     feishuConfigDirty = false;
     renderState();
@@ -1587,6 +1623,67 @@
     }).join('');
   }
 
+  function getK12WorkspaceStatusLabel(item = null) {
+    if (!item || typeof item !== 'object') {
+      return '未执行';
+    }
+    if (item.ok) {
+      return `成功 ${item.finalRoute || ''}`.trim();
+    }
+    const status = Number(item.finalStatus || item.requestStatus || item.acceptStatus) || 0;
+    return status ? `失败 HTTP ${status}` : '失败';
+  }
+
+  function getK12WorkspaceBadgeClass(item = null) {
+    if (!item || typeof item !== 'object') {
+      return 'skipped';
+    }
+    return item.ok ? 'success' : 'failed';
+  }
+
+  function renderK12Workspace() {
+    if (!els.k12WorkspaceHistory || !els.k12WorkspaceStatus) {
+      return;
+    }
+    const last = state?.k12WorkspaceLastResult || null;
+    const history = getK12WorkspaceHistory();
+    els.k12WorkspaceStatus.textContent = last
+      ? `${getK12WorkspaceStatusLabel(last)} / ${formatDateTime(last.updatedAt)}`
+      : (history.length ? `${history.length} 条历史` : '未执行');
+
+    if (!history.length) {
+      els.k12WorkspaceHistory.innerHTML = '<div class="redeem-item">暂无 K12 记录</div>';
+      return;
+    }
+
+    els.k12WorkspaceHistory.innerHTML = history.slice(0, 30).map((item) => {
+      const requestStatus = Number(item.requestStatus) || 0;
+      const acceptStatus = Number(item.acceptStatus) || 0;
+      const routeText = [
+        item.finalRoute ? `最终：${item.finalRoute}` : '',
+        requestStatus ? `request=${requestStatus}` : '',
+        acceptStatus ? `accept=${acceptStatus}` : '',
+      ].filter(Boolean).join(' / ') || '-';
+      return `
+        <div class="redeem-item">
+          <div class="redeem-head">
+            <div>
+              <strong class="pool-email">${htmlEscape(item.email || '未知邮箱')}</strong>
+              <div class="pool-meta mono">${htmlEscape(item.workspaceId || K12_DEFAULT_WORKSPACE_ID)}</div>
+            </div>
+            <span class="badge ${getK12WorkspaceBadgeClass(item)}">${htmlEscape(getK12WorkspaceStatusLabel(item))}</span>
+          </div>
+          <div class="redeem-grid">
+            <span>路径</span><code>${htmlEscape(routeText)}</code>
+            <span>Token</span><code>${htmlEscape(item.tokenPreview || '-')}</code>
+            <span>更新</span><span>${htmlEscape(formatDateTime(item.updatedAt))}</span>
+            <span>结果</span><span>${htmlEscape(item.message || '-')}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
   function getExternalRedeemStatusLabel(item = {}) {
     if (hasExternalRedeemRechargeFailureSignal(item)) {
       return '充值失败';
@@ -1775,6 +1872,9 @@
         els.chatgptTotpAutoEnable.checked = Boolean(state?.chatgptTotpAutoEnable);
       }
     }
+    if (!k12ConfigDirty && els.k12WorkspaceId) {
+      els.k12WorkspaceId.value = String(state?.k12WorkspaceId || els.k12WorkspaceId.value || K12_DEFAULT_WORKSPACE_ID);
+    }
     if (!externalRedeemConfigDirty) {
       els.externalRedeemEnabled.checked = Boolean(state?.externalRedeemEnabled);
       els.externalRedeemBaseUrl.value = normalizeUrl(state?.externalRedeemBaseUrl || els.externalRedeemBaseUrl.value || EXTERNAL_REDEEM_DEFAULT_BASE_URL);
@@ -1792,6 +1892,7 @@
     els.currentEmail.textContent = normalizeEmail(state?.email || state?.registrationEmailState?.current || '') || '等待邮箱';
     renderPool(entries);
     renderChatGptAc();
+    renderK12Workspace();
     renderFeishuSyncStatus();
     renderExternalRedeemQueue();
     renderExternalRedeemRecords();
@@ -1880,6 +1981,74 @@
     } finally {
       els.syncFeishuNow.disabled = false;
       els.syncFeishuNow.textContent = previousText || '同步兑换记录';
+    }
+  }
+
+  async function runK12WorkspaceRedeem(useCurrentAc = true) {
+    const runButton = useCurrentAc ? els.runK12CurrentAc : els.runK12Token;
+    const otherButton = useCurrentAc ? els.runK12Token : els.runK12CurrentAc;
+    if (!runButton) {
+      return;
+    }
+    const previousText = runButton.textContent;
+    runButton.disabled = true;
+    if (otherButton) {
+      otherButton.disabled = true;
+    }
+    runButton.textContent = '执行中...';
+    if (els.k12WorkspaceStatus) {
+      els.k12WorkspaceStatus.textContent = '执行中...';
+    }
+    try {
+      await saveSettings({ silent: true });
+      const response = await sendMessage({
+        type: 'RUN_K12_WORKSPACE_REDEEM',
+        source: 'sidepanel',
+        payload: {
+          workspaceId: String(els.k12WorkspaceId?.value || '').trim() || K12_DEFAULT_WORKSPACE_ID,
+          accessToken: useCurrentAc ? '' : String(els.k12AccessToken?.value || ''),
+          useCurrent: Boolean(useCurrentAc),
+        },
+      }, 70000);
+      state = response?.state || state;
+      if (!useCurrentAc && response?.ok && els.k12AccessToken) {
+        els.k12AccessToken.value = '';
+      }
+      renderState();
+      showToast(response?.ok ? 'K12 Workspace 已开通' : 'K12 Workspace 执行失败', response?.ok ? 'success' : 'error', 7000);
+    } catch (error) {
+      renderK12Workspace();
+      showToast(error.message || 'K12 Workspace 执行失败', 'error', 9000);
+    } finally {
+      runButton.disabled = false;
+      if (otherButton) {
+        otherButton.disabled = false;
+      }
+      runButton.textContent = previousText || (useCurrentAc ? '使用当前 AC' : '粘贴 token 执行');
+    }
+  }
+
+  async function clearK12WorkspaceHistory() {
+    if (!els.clearK12History) {
+      return;
+    }
+    const previousText = els.clearK12History.textContent;
+    els.clearK12History.disabled = true;
+    els.clearK12History.textContent = '清空中...';
+    try {
+      const response = await sendMessage({
+        type: 'CLEAR_K12_WORKSPACE_HISTORY',
+        source: 'sidepanel',
+        payload: {},
+      }, 20000);
+      state = response?.state || state;
+      renderState();
+      showToast('K12 历史已清空', 'success');
+    } catch (error) {
+      showToast(error.message || 'K12 历史清空失败', 'error', 7000);
+    } finally {
+      els.clearK12History.disabled = false;
+      els.clearK12History.textContent = previousText || '清空 K12 历史';
     }
   }
 
@@ -2772,6 +2941,21 @@
     renderChatGptAc();
   });
   els.exportChatgptAc.addEventListener('click', exportChatGptAcCsv);
+  if (els.runK12CurrentAc) {
+    els.runK12CurrentAc.addEventListener('click', () => {
+      runK12WorkspaceRedeem(true).catch((error) => showToast(error.message || 'K12 Workspace 执行失败', 'error', 9000));
+    });
+  }
+  if (els.runK12Token) {
+    els.runK12Token.addEventListener('click', () => {
+      runK12WorkspaceRedeem(false).catch((error) => showToast(error.message || 'K12 Workspace 执行失败', 'error', 9000));
+    });
+  }
+  if (els.clearK12History) {
+    els.clearK12History.addEventListener('click', () => {
+      clearK12WorkspaceHistory().catch((error) => showToast(error.message || 'K12 历史清空失败', 'error', 7000));
+    });
+  }
   els.testFeishuSync.addEventListener('click', () => {
     testFeishuSync().catch((error) => showToast(error.message || '飞书同步测试失败', 'error', 7000));
   });
@@ -2844,6 +3028,17 @@
     });
   });
   [
+    els.k12WorkspaceId,
+  ].forEach((element) => {
+    if (!element) return;
+    element.addEventListener('input', () => {
+      k12ConfigDirty = true;
+    });
+    element.addEventListener('change', () => {
+      k12ConfigDirty = true;
+    });
+  });
+  [
     els.externalRedeemEnabled,
     els.externalRedeemBaseUrl,
     els.externalRedeemApiKey,
@@ -2881,6 +3076,12 @@
     if (!button) return;
     executeNode(button.dataset.nodeId).catch((error) => showToast(error.message, 'error'));
   });
+  if (els.mainWorkspaceTab) {
+    els.mainWorkspaceTab.addEventListener('click', () => setWorkspaceTab('main'));
+  }
+  if (els.k12WorkspaceTab) {
+    els.k12WorkspaceTab.addEventListener('click', () => setWorkspaceTab('k12'));
+  }
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || typeof message !== 'object') return;
@@ -2918,6 +3119,8 @@
       loadState().catch(() => {});
     }
   });
+
+  setWorkspaceTab(activeWorkspaceTab);
 
   loadState().catch((error) => {
     els.emailPool.value = DEFAULT_POOL_TEXT;

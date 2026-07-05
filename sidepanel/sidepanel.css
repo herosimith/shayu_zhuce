@@ -85,7 +85,8 @@ main {
 }
 
 .toolbar,
-.panel {
+.panel,
+.tab-bar {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
@@ -103,6 +104,33 @@ main {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.tab-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+}
+
+.tab {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 .panel-title {

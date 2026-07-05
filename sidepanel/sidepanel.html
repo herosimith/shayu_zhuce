@@ -25,7 +25,12 @@
       <button id="btn-stop" class="btn danger" type="button">停止</button>
     </section>
 
-    <section class="panel">
+    <nav class="tab-bar" role="tablist" aria-label="工作区">
+      <button id="tab-main-workspace" class="tab active" type="button" role="tab" aria-selected="true">注册兑换</button>
+      <button id="tab-k12-workspace" class="tab" type="button" role="tab" aria-selected="false">K12 兑换</button>
+    </nav>
+
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>多线程工作台</h2>
         <span id="multi-thread-status">单线程</span>
@@ -46,7 +51,7 @@
       <div id="thread-logs-grid" class="thread-logs-grid"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>iCloud API 邮箱池</h2>
         <span id="pool-summary">未加载</span>
@@ -78,7 +83,7 @@
       <div id="pool-list" class="pool-list"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>ChatGPT AC</h2>
         <span id="chatgpt-ac-status">未读取</span>
@@ -91,7 +96,31 @@
       <div id="chatgpt-ac-details" class="ac-details" hidden></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="k12" hidden>
+      <div class="panel-title">
+        <h2>K12 Workspace</h2>
+        <span id="k12-workspace-status">未执行</span>
+      </div>
+      <label class="field">
+        <span>Workspace ID</span>
+        <input id="input-k12-workspace-id" type="text" spellcheck="false"
+          placeholder="631e1603-06cf-4f0b-b79b-d09fbfcfe98d">
+      </label>
+      <label class="field">
+        <span>access_token（可留空使用当前 AC）</span>
+        <textarea id="input-k12-access-token" spellcheck="false"
+          placeholder="粘贴 access_token / 包含 access_token 的 JSON；留空则读取当前 ChatGPT AC"></textarea>
+      </label>
+      <div class="actions">
+        <button id="btn-run-k12-current-ac" class="btn" type="button">使用当前 AC</button>
+        <button id="btn-run-k12-token" class="btn ghost" type="button">粘贴 token 执行</button>
+        <button id="btn-clear-k12-history" class="btn ghost" type="button">清空 K12 历史</button>
+      </div>
+      <div class="pool-meta">K12 会单独请求 ChatGPT Workspace invite 接口，不使用外部兑换队列，也不修改插件全流程代理。</div>
+      <div id="k12-workspace-history" class="redeem-list"></div>
+    </section>
+
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>登录安全</h2>
         <span>可选</span>
@@ -107,7 +136,7 @@
       <div class="pool-meta">默认关闭；勾选后仅在 AC 合格时绑定 2FA，并把密码与 secretMasked 同步到 Lisa 台账。</div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>飞书多维表格同步</h2>
         <span id="feishu-sync-status">未启用</span>
@@ -139,7 +168,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>外部兑换队列</h2>
         <span id="external-redeem-status">未启用</span>
@@ -185,7 +214,7 @@
       <div id="external-redeem-records-list" class="redeem-list"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>插件全流程代理</h2>
         <span id="proxy-test-result">未测试</span>
@@ -212,7 +241,7 @@
       <div id="proxy-pool-list" class="redeem-list"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>执行链路</h2>
         <span id="current-email">等待邮箱</span>
@@ -220,7 +249,7 @@
       <div id="steps-list" class="steps-list"></div>
     </section>
 
-    <section class="panel logs-panel">
+    <section class="panel logs-panel" data-panel-tab="main">
       <div class="panel-title">
         <h2>日志</h2>
         <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>

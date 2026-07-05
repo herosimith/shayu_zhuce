@@ -37,6 +37,8 @@
       clearPluginProxy = null,
       exportCurrentSessionJson,
       readChatGptAccessTokenInfo,
+      runK12WorkspaceRedeem,
+      clearK12WorkspaceHistory,
       pollExternalRedeemQueue,
       retryExternalRedeemQueueItem,
       deleteExternalRedeemQueueItem,
@@ -1111,6 +1113,20 @@
             throw new Error('ChatGPT AC 读取能力未接入。');
           }
           return await readChatGptAccessTokenInfo(message.payload || {});
+        }
+
+        case 'RUN_K12_WORKSPACE_REDEEM': {
+          if (typeof runK12WorkspaceRedeem !== 'function') {
+            throw new Error('K12 Workspace 兑换能力未接入。');
+          }
+          return await runK12WorkspaceRedeem(message.payload || {});
+        }
+
+        case 'CLEAR_K12_WORKSPACE_HISTORY': {
+          if (typeof clearK12WorkspaceHistory !== 'function') {
+            throw new Error('K12 Workspace 历史清理能力未接入。');
+          }
+          return await clearK12WorkspaceHistory();
         }
 
         case 'TEST_FEISHU_SYNC': {
