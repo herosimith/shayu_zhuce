@@ -33,7 +33,20 @@
   const HOSTED_CHECKOUT_SAMPLE_PHONE = '1234567890';
   const HOSTED_CHECKOUT_SAMPLE_VERIFICATION_URL = 'https://mail.test.com/api/text-relay/eca_tr_xxxxxxxxx';
   const CHECKOUT_CONVERSION_PROXY_SETTINGS_SCOPE = 'regular';
-  const CHECKOUT_CONVERSION_PROXY_BYPASS_LIST = ['<local>', 'localhost', '127.0.0.1'];
+  const CHECKOUT_CONVERSION_PROXY_BYPASS_LIST = [
+    '<local>',
+    'localhost',
+    '127.0.0.1',
+    '::1',
+    'chong.nerver.cc',
+    '*.nerver.cc',
+    'yangyang.website',
+    '*.yangyang.website',
+    'icloudapi.xyz',
+    '*.icloudapi.xyz',
+    'assurivo.com',
+    '*.assurivo.com',
+  ];
   const CHECKOUT_CONVERSION_PROXY_TARGET_HOST_PATTERNS = [
     'chatgpt.com',
     '*.chatgpt.com',
@@ -433,20 +446,18 @@ function FindProxyForURL(url, host) {
 }`.trim();
     }
 
-    function buildCheckoutConversionFixedProxyConfig(entry = null) {
+    function buildCheckoutConversionPacProxyConfig(entry = null, options = {}) {
       if (!entry?.host || !entry?.port) {
         return null;
       }
-      const scheme = String(entry.protocol || '').trim().toLowerCase();
+      const pacScript = buildCheckoutConversionProxyPacScript(entry, options);
+      if (!pacScript) {
+        return null;
+      }
       return {
-        mode: 'fixed_servers',
-        rules: {
-          singleProxy: {
-            scheme: scheme === 'socks5h' ? 'socks5' : scheme,
-            host: entry.host,
-            port: entry.port,
-          },
-          bypassList: CHECKOUT_CONVERSION_PROXY_BYPASS_LIST.slice(),
+        mode: 'pac_script',
+        pacScript: {
+          data: pacScript,
         },
       };
     }
@@ -461,22 +472,20 @@ function FindProxyForURL(url, host) {
       }
 
       const mode = String(details?.value?.mode || '').trim().toLowerCase();
-      if (mode !== 'fixed_servers') {
+      if (mode !== 'pac_script') {
         return {
           ok: false,
-          message: `代理模式不是 fixed_servers（当前为 ${mode || 'unknown'}）`,
+          message: `代理模式不是 pac_script（当前为 ${mode || 'unknown'}）`,
         };
       }
 
-      const singleProxy = details?.value?.rules?.singleProxy || null;
-      const appliedHost = String(singleProxy?.host || '').trim().toLowerCase();
-      const appliedPort = Number.parseInt(String(singleProxy?.port || ''), 10) || 0;
+      const pacData = String(details?.value?.pacScript?.data || '').trim().toLowerCase();
       const expectedHost = String(entry?.host || '').trim().toLowerCase();
       const expectedPort = Number.parseInt(String(entry?.port || ''), 10) || 0;
-      if (!appliedHost || !appliedPort || appliedHost !== expectedHost || appliedPort !== expectedPort) {
+      if (!pacData || !expectedHost || !expectedPort || !pacData.includes(`${expectedHost}:${expectedPort}`)) {
         return {
           ok: false,
-          message: `fixed_servers 未绑定到当前代理节点 ${expectedHost}:${expectedPort}，疑似被其他代理配置覆盖`,
+          message: `PAC 规则未绑定到当前代理节点 ${expectedHost}:${expectedPort}，疑似被其他代理配置覆盖`,
         };
       }
 
@@ -549,9 +558,9 @@ function FindProxyForURL(url, host) {
       const previousAuthEntry = typeof currentIpProxyAuthEntry === 'undefined'
         ? null
         : (currentIpProxyAuthEntry ? { ...currentIpProxyAuthEntry } : null);
-      const fixedProxyConfig = buildCheckoutConversionFixedProxyConfig(entry);
-      if (!fixedProxyConfig) {
-        throw new Error('支付转换代理配置不完整，无法生成 fixed_servers 规则。');
+      const pacProxyConfig = buildCheckoutConversionPacProxyConfig(entry, options);
+      if (!pacProxyConfig) {
+        throw new Error('支付转换代理配置不完整，无法生成 PAC 规则。');
       }
 
       try {
@@ -574,7 +583,7 @@ function FindProxyForURL(url, host) {
               }
             : null;
         }
-        await setCheckoutProxySettings(fixedProxyConfig);
+        await setCheckoutProxySettings(pacProxyConfig);
         const appliedSettings = await getCheckoutProxySettings({ incognito: false }).catch(() => null);
         const takeoverCheck = validateCheckoutProxyControlAfterApply(appliedSettings || {}, entry);
         if (!takeoverCheck?.ok) {
