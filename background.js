@@ -2079,7 +2079,7 @@ async function selectNextCheckoutConversionProxyForAutoRun(context = {}) {
     ? `第 ${targetRun}/${totalRuns} 轮${attemptRuns > 1 ? ` 第 ${attemptRuns} 次尝试` : ''}`
     : '本次执行';
   await addLog(
-    `全流程 JP 代理池：${runLabel} 已切换到第 ${selectedIndex + 1}/${entries.length} 条代理（${getCheckoutConversionProxyLogDisplay(selectedProxyUrl)}）。`,
+    `全流程代理池：${runLabel} 已切换到第 ${selectedIndex + 1}/${entries.length} 条代理（${getCheckoutConversionProxyLogDisplay(selectedProxyUrl)}）。`,
     'info'
   );
   return selectedProxyUrl;
@@ -2095,7 +2095,7 @@ async function applyRunScopedCheckoutConversionProxy(options = {}) {
     return null;
   }
   if (!plusCheckoutCreateExecutor?.applyCheckoutConversionProxyForScope) {
-    await addLog('全流程 JP 代理未启用：代理模块尚未加载。', 'warn');
+    await addLog('全流程代理未启用：代理模块尚未加载。', 'warn');
     return null;
   }
 
@@ -2106,7 +2106,7 @@ async function applyRunScopedCheckoutConversionProxy(options = {}) {
   runScopedCheckoutConversionProxySnapshot = snapshot;
   const display = getRunScopedCheckoutConversionProxyDisplay(snapshot);
   if (options.startLog !== false) {
-    await addLog(`${options.startLog || '全流程 JP 代理已启用：本次插件执行期间，浏览器网络都会走该代理。'}（${display}）`, 'info');
+    await addLog(`${options.startLog || '全流程代理已启用：本次插件执行期间，浏览器网络都会走该代理。'}（${display}）`, 'info');
   }
   return snapshot;
 }
@@ -2123,11 +2123,11 @@ async function restoreRunScopedCheckoutConversionProxy(reason = '插件执行结
     if (plusCheckoutCreateExecutor?.restoreCheckoutConversionProxyForScope) {
       await plusCheckoutCreateExecutor.restoreCheckoutConversionProxyForScope(snapshot);
     }
-    await addLog(`全流程 JP 代理已释放：${reason}，浏览器网络已恢复到执行前状态。`, 'info');
+    await addLog(`全流程代理已释放：${reason}，浏览器网络已恢复到执行前状态。`, 'info');
     return true;
   } catch (error) {
     runScopedCheckoutConversionProxySnapshot = snapshot;
-    await addLog(`全流程 JP 代理释放失败：${error?.message || String(error || '未知错误')}`, 'warn');
+    await addLog(`全流程代理释放失败：${error?.message || String(error || '未知错误')}`, 'warn');
     return false;
   }
 }
@@ -2157,7 +2157,7 @@ async function applyPluginProxyForManualUse(options = {}) {
       ...(await getState()),
       ...(proxyUrl ? { plusCheckoutConversionProxyUrl: proxyUrl } : {}),
     },
-    startLog: '全流程 JP 代理已手动启用：当前 Chrome 浏览器网络会走该代理。',
+    startLog: '全流程代理已手动启用：当前 Chrome 浏览器网络会走该代理。',
   });
   return {
     applied: Boolean(snapshot?.applied),
@@ -15617,7 +15617,7 @@ async function runAutoSequenceFromNode(startNodeId, context = {}) {
   return runWithCheckoutConversionProxyDuringPluginUse(
     () => runAutoSequenceFromNodeGraph(normalizedStartNodeId, context),
     {
-      startLog: '全流程 JP 代理已启用：本轮插件执行期间，浏览器网络都会走该代理。',
+      startLog: '全流程代理已启用：本轮插件执行期间，浏览器网络都会走该代理。',
       finishReason: '本轮自动运行结束',
     }
   );

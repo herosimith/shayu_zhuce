@@ -2452,7 +2452,7 @@
     const proxyUrl = normalizeProxyUrl(els.checkoutProxy.value);
     if (!proxyUrl) {
       els.proxyTestResult.textContent = '请先填写代理';
-      showToast('请先填写全流程 JP 代理', 'error');
+      showToast('请先填写全流程代理', 'error');
       return;
     }
     els.testProxy.disabled = true;
@@ -2579,7 +2579,7 @@
     const proxyUrl = normalizeProxyUrl(els.checkoutProxy.value);
     if (!proxyUrl) {
       els.proxyTestResult.textContent = '请先填写代理';
-      showToast('请先填写全流程 JP 代理', 'error');
+      showToast('请先填写全流程代理', 'error');
       return;
     }
     els.applyProxy.disabled = true;
@@ -2593,7 +2593,7 @@
       }, 30000);
       const display = normalizeUrl(response?.displayName) || '已启用';
       els.proxyTestResult.textContent = `已启用: ${display}`;
-      showToast('全流程 JP 代理已启用', 'success');
+      showToast('全流程代理已启用', 'success');
     } catch (error) {
       els.proxyTestResult.textContent = '启用失败';
       showToast(error.message || '代理启用失败', 'error', 6200);

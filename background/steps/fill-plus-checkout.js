@@ -1938,7 +1938,7 @@
       if (paymentMethod === PLUS_PAYMENT_METHOD_GOPAY
         && typeof probeIpProxyExit === 'function'
         && !resolveMeiguodizhiCountryCode(billingState?.ipProxyAppliedExitRegion || billingState?.ipProxyExitRegion || '')) {
-        throw new Error('步骤 7：GoPay 账单地址需要当前代理出口国家/地区，但本次复测没有拿到国家码；已停止填写，避免误用旧的 KR/ID 地区。请先点 IP 代理“检测出口”，确认显示 JP 后再继续。');
+        throw new Error('步骤 7：GoPay 账单地址需要当前代理出口国家/地区，但本次复测没有拿到国家码；已停止填写，避免误用旧的 KR/ID 地区。请先点 IP 代理“检测出口”，确认能显示当前出口国家码后再继续。');
       }
       async function fillBillingAddressWithSeed(addressSeed, options = {}) {
         if (!addressSeed) {

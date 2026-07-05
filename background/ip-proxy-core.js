@@ -788,6 +788,27 @@ function parseIpProxyLine(line, provider = DEFAULT_IP_PROXY_SERVICE) {
 
   const schemaMatch = text.match(/^(https?|socks4|socks5):\/\/(.+)$/i);
   const protocol = normalizeIpProxyProtocol(schemaMatch ? schemaMatch[1] : '');
+  if (schemaMatch) {
+    try {
+      const parsed = new URL(text);
+      const host = String(parsed.hostname || '').trim();
+      const port = normalizeIpProxyPort(parsed.port);
+      if (!host || !port) {
+        return null;
+      }
+      return {
+        host,
+        port,
+        username: parsed.username ? decodeURIComponent(parsed.username) : '',
+        password: parsed.password ? decodeURIComponent(parsed.password) : '',
+        protocol,
+        region: '',
+        provider: normalizeIpProxyProviderValue(provider),
+      };
+    } catch {
+      return null;
+    }
+  }
   const rawBody = schemaMatch ? schemaMatch[2] : text;
   const firstSegment = rawBody.split(/[/?#]/)[0];
   const parts = firstSegment.split(':');
@@ -3513,9 +3534,13 @@ async function applyIpProxySettingsFromState(state = {}, options = {}) {
     exitSource: String(exit?.source || '').trim().toLowerCase(),
     authDiagnostics: status?.hasAuth ? getIpProxyAuthDiagnosticsSummary() : '',
   };
-  const expectedRegion = String(entry?.region || '').trim();
+  const expectedRegion = options.ignoreRegionExpectation === true
+    ? ''
+    : String(entry?.region || '').trim();
   let normalizedExitStatus = applyExitRegionExpectation(exitStatus, expectedRegion);
-  normalizedExitStatus = applyExitBaselineExpectation(normalizedExitStatus);
+  if (options.ignoreBaselineExpectation !== true) {
+    normalizedExitStatus = applyExitBaselineExpectation(normalizedExitStatus);
+  }
   if (shouldVerifyIpProxyTargetReachability(normalizedExitStatus)) {
     const targetDiagnostics = [];
     const reachability = await detectIpProxyTargetReachabilityByPageContext({
@@ -3977,9 +4002,13 @@ async function probeIpProxyExit(options = {}) {
       exitSource: String(exit?.source || '').trim().toLowerCase(),
       authDiagnostics: statusSeed?.hasAuth ? getIpProxyAuthDiagnosticsSummary() : '',
     };
-    const expectedRegion = String(statusSeed?.region || '').trim();
+    const expectedRegion = options.ignoreRegionExpectation === true
+      ? ''
+      : String(statusSeed?.region || '').trim();
     let normalized = applyExitRegionExpectation(finalStatus, expectedRegion);
-    normalized = applyExitBaselineExpectation(normalized);
+    if (options.ignoreBaselineExpectation !== true) {
+      normalized = applyExitBaselineExpectation(normalized);
+    }
     if (shouldVerifyIpProxyTargetReachability(normalized)) {
       const targetDiagnostics = [];
       const reachability = await detectIpProxyTargetReachabilityByPageContext({

@@ -1882,12 +1882,16 @@
               resetNetworkState: shouldPreRebindBeforeProbe,
               forceAuthRebind: shouldPreRebindBeforeProbe,
               suppressAuthRebind: !shouldPreRebindBeforeProbe,
+              ignoreRegionExpectation: true,
+              ignoreBaselineExpectation: true,
             }).catch(() => null);
           }
 
           const result = await probeIpProxyExit({
             timeoutMs,
             authRebindMaxAttempts: is711AccountMode ? 1 : undefined,
+            ignoreRegionExpectation: true,
+            ignoreBaselineExpectation: true,
           });
           return { ok: true, ...result };
         }
@@ -2133,7 +2137,7 @@
             throw new Error('自动流程运行中，当前不能手动启用代理。');
           }
           if (typeof executeWithCheckoutConversionProxy !== 'function') {
-            throw new Error('全流程 JP 代理能力尚未接入。');
+            throw new Error('全流程代理能力尚未接入。');
           }
           const proxyUrl = typeof normalizeCheckoutConversionProxyInput === 'function'
             ? normalizeCheckoutConversionProxyInput(message?.payload?.proxyUrl)

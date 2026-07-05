@@ -45,9 +45,16 @@
     '*.stripe.com',
   ];
   const CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS = [
-    'https://chatgpt.com/cdn-cgi/trace',
     'http://ip-api.com/json?lang=en',
+    'http://ipinfo.io/json',
+    'http://myip.ipip.net',
+    'http://ipwho.is/',
+    'http://api.ipify.org?format=json',
+    'http://checkip.amazonaws.com',
+    'https://chatgpt.com/cdn-cgi/trace',
     'https://ipinfo.io/json',
+    'https://api.ipify.org?format=json',
+    'https://httpbin.org/ip',
   ];
   const CHECKOUT_CONVERSION_PROXY_TEST_TARGET_ENDPOINTS = [
     'https://chatgpt.com/',
@@ -60,6 +67,15 @@
     '*.ipinfo.io',
     'cloudflare.com',
     '*.cloudflare.com',
+    'myip.ipip.net',
+    '*.ipip.net',
+    'ipwho.is',
+    '*.ipwho.is',
+    'api.ipify.org',
+    '*.ipify.org',
+    'checkip.amazonaws.com',
+    'httpbin.org',
+    '*.httpbin.org',
   ];
   const CHECKOUT_CONVERSION_LOCAL_BRIDGE_URL = 'http://127.0.0.1:18790';
   const CHECKOUT_CONVERSION_UPSTREAM_HOST = '';
@@ -638,6 +654,8 @@ function FindProxyForURL(url, host) {
             timeoutMs: 12000,
             errors: probeDiagnostics,
             probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
+            backgroundMaxEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS.length,
+            backgroundPerEndpointTimeoutMs: 6000,
           }).catch((error) => {
             probeDiagnostics.push(`probe:background:${error?.message || error}`);
             return { ip: '', region: '', source: 'background_unavailable', endpoint: '' };
