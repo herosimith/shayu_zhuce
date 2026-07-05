@@ -78,6 +78,11 @@
     '*.httpbin.org',
   ];
   const CHECKOUT_CONVERSION_LOCAL_BRIDGE_URL = 'http://127.0.0.1:18790';
+  const CHECKOUT_CONVERSION_PROXY_TEST_BACKGROUND_TIMEOUT_MS = 18000;
+  const CHECKOUT_CONVERSION_PROXY_TEST_PAGE_TIMEOUT_MS = 18000;
+  const CHECKOUT_CONVERSION_PROXY_TEST_PER_ENDPOINT_TIMEOUT_MS = 6500;
+  const CHECKOUT_CONVERSION_PROXY_TEST_MAX_BACKGROUND_ENDPOINTS = 4;
+  const CHECKOUT_CONVERSION_PROXY_TEST_DIAGNOSTICS_MAX_ITEMS = 8;
   const CHECKOUT_CONVERSION_UPSTREAM_HOST = '';
   const CHECKOUT_CONVERSION_UPSTREAM_PORT = 0;
 
@@ -550,6 +555,9 @@ function FindProxyForURL(url, host) {
       }
 
       try {
+        if (options?.drainBeforeApply === true && typeof forceProxyConnectionDrainBeforeAuthSwitch === 'function') {
+          await forceProxyConnectionDrainBeforeAuthSwitch();
+        }
         if (typeof installIpProxyAuthListener === 'function') {
           installIpProxyAuthListener();
         }
@@ -652,19 +660,24 @@ function FindProxyForURL(url, host) {
         }
         snapshot = await applyProxy(proxyUrl, {
           targetHostPatterns: CHECKOUT_CONVERSION_PROXY_TEST_TARGET_HOST_PATTERNS,
+          drainBeforeApply: true,
         });
         if (typeof clearIpProxyNetworkState === 'function') {
           await clearIpProxyNetworkState().catch(() => null);
         }
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
         let exit = null;
         if (typeof detectProxyExitInfoByBackgroundFetch === 'function') {
           exit = await detectProxyExitInfoByBackgroundFetch({
-            timeoutMs: 12000,
+            timeoutMs: CHECKOUT_CONVERSION_PROXY_TEST_BACKGROUND_TIMEOUT_MS,
             errors: probeDiagnostics,
             probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
-            backgroundMaxEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS.length,
-            backgroundPerEndpointTimeoutMs: 6000,
+            backgroundMaxEndpoints: Math.min(
+              CHECKOUT_CONVERSION_PROXY_TEST_MAX_BACKGROUND_ENDPOINTS,
+              CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS.length
+            ),
+            backgroundPerEndpointTimeoutMs: CHECKOUT_CONVERSION_PROXY_TEST_PER_ENDPOINT_TIMEOUT_MS,
           }).catch((error) => {
             probeDiagnostics.push(`probe:background:${error?.message || error}`);
             return { ip: '', region: '', source: 'background_unavailable', endpoint: '' };
@@ -676,7 +689,7 @@ function FindProxyForURL(url, host) {
         if (!String(exit?.ip || '').trim() && typeof detectProxyExitInfoByPageContext === 'function') {
           probeDiagnostics.push('probe:bg:fallback_page_context');
           exit = await detectProxyExitInfoByPageContext({
-            timeoutMs: 12000,
+            timeoutMs: CHECKOUT_CONVERSION_PROXY_TEST_PAGE_TIMEOUT_MS,
             errors: probeDiagnostics,
             probeEndpoints: CHECKOUT_CONVERSION_PROXY_TEST_PROBE_ENDPOINTS,
           }).catch((error) => {
@@ -684,13 +697,19 @@ function FindProxyForURL(url, host) {
             return exit || { ip: '', region: '', source: 'page_context_unavailable', endpoint: '' };
           });
         }
+        if (!String(exit?.ip || '').trim() && typeof appendIpProxyAuthDiagnosticsToErrors === 'function') {
+          appendIpProxyAuthDiagnosticsToErrors(probeDiagnostics);
+        }
         if (!String(exit?.ip || '').trim() && typeof appendIpProxyRuntimeErrorDiagnosticsToErrors === 'function') {
           appendIpProxyRuntimeErrorDiagnosticsToErrors(probeDiagnostics, 45000);
         }
         const exitIp = String(exit?.ip || '').trim();
         const exitRegion = String(exit?.region || '').trim();
         if (!exitIp) {
-          const diagnostics = summarizeCheckoutConversionProxyDiagnostics(probeDiagnostics, 4);
+          const diagnostics = summarizeCheckoutConversionProxyDiagnostics(
+            probeDiagnostics,
+            CHECKOUT_CONVERSION_PROXY_TEST_DIAGNOSTICS_MAX_ITEMS
+          );
           throw new Error(diagnostics
             ? `未检测到代理出口 IP。诊断：${diagnostics}`
             : '未检测到代理出口 IP。');
@@ -719,7 +738,7 @@ function FindProxyForURL(url, host) {
           diagnostics: summarizeCheckoutConversionProxyDiagnostics([
             ...probeDiagnostics,
             ...targetDiagnostics,
-          ], 4),
+          ], CHECKOUT_CONVERSION_PROXY_TEST_DIAGNOSTICS_MAX_ITEMS),
         };
       } finally {
         if (snapshot?.applied) {

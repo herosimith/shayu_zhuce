@@ -486,17 +486,24 @@ function buildProbeDiagnosticsSummary(errors = [], maxItems = 4) {
     retryItem,
     abortFallbackItem,
   ].filter(Boolean);
+  const finalItems = [];
+  const addItem = (item) => {
+    const text = String(item || '').trim();
+    if (!text || finalItems.includes(text) || finalItems.length >= headLimit) {
+      return;
+    }
+    finalItems.push(text);
+  };
   for (const mustKeepItem of mustKeepItems) {
-    if (headItems.includes(mustKeepItem)) {
-      continue;
-    }
-    if (headItems.length >= headLimit) {
-      headItems[headItems.length - 1] = mustKeepItem;
-    } else {
-      headItems.push(mustKeepItem);
-    }
+    addItem(mustKeepItem);
   }
-  return headItems.join(' | ');
+  for (const headItem of headItems) {
+    addItem(headItem);
+  }
+  for (const item of normalized) {
+    addItem(item);
+  }
+  return finalItems.join(' | ');
 }
 
 function normalizeIpProxyMode(value = '') {

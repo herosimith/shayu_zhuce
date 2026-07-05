@@ -2456,13 +2456,13 @@
       return;
     }
     els.testProxy.disabled = true;
-    els.proxyTestResult.textContent = '测试中...';
+    els.proxyTestResult.textContent = '测试中（最多 90 秒）...';
     try {
       const response = await sendMessage({
         type: 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY',
         source: 'sidepanel',
         payload: { proxyUrl },
-      }, 45000);
+      }, 90000);
       const exitIp = String(response?.exitIp || '').trim();
       const exitRegion = String(response?.exitRegion || '').trim();
       const summary = exitIp ? `${exitIp}${exitRegion ? ` [${exitRegion}]` : ''}` : '可用';
@@ -2499,7 +2499,7 @@
             type: 'TEST_PLUS_CHECKOUT_CONVERSION_PROXY',
             source: 'sidepanel',
             payload: { proxyUrl },
-          }, 45000);
+          }, 90000);
           results.push({
             index,
             ok: true,
