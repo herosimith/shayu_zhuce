@@ -106,12 +106,38 @@
         <input id="input-k12-workspace-id" type="text" spellcheck="false"
           placeholder="631e1603-06cf-4f0b-b79b-d09fbfcfe98d">
       </label>
+      <div class="provider-mode" role="radiogroup" aria-label="K12 验证码接收版本">
+        <label>
+          <input id="input-k12-api-mode-normal" name="k12-api-mode" type="radio" value="normal" checked>
+          <span>普通版</span>
+        </label>
+        <label>
+          <input id="input-k12-api-mode-taobao" name="k12-api-mode" type="radio" value="taobao">
+          <span>淘宝版</span>
+        </label>
+        <label>
+          <input id="input-k12-api-mode-hotmail" name="k12-api-mode" type="radio" value="hotmail">
+          <span>Hotmail</span>
+        </label>
+      </div>
+      <div id="k12-pool-format-hint" class="pool-meta">普通版：每行 邮箱----完整接口URL；淘宝版：邮箱----邮件查询码；Hotmail：邮箱----密码----client_id----refresh_token</div>
+      <label class="field">
+        <span>K12 邮箱池</span>
+        <textarea id="input-k12-email-pool" spellcheck="false"
+          placeholder="邮箱----接口URL / 查询码 / 密码----client_id----refresh_token"></textarea>
+      </label>
+      <div class="panel-title compact">
+        <h2>K12 邮箱池状态</h2>
+        <span id="k12-pool-summary">未加载</span>
+      </div>
+      <div id="k12-pool-list" class="pool-list"></div>
       <label class="field">
         <span>access_token（可留空使用当前 AC）</span>
         <textarea id="input-k12-access-token" spellcheck="false"
           placeholder="粘贴 access_token / 包含 access_token 的 JSON；留空则读取当前 ChatGPT AC"></textarea>
       </label>
       <div class="actions">
+        <button id="btn-run-k12-auto-register" class="btn primary" type="button">注册并执行 K12</button>
         <button id="btn-run-k12-current-ac" class="btn" type="button">使用当前 AC</button>
         <button id="btn-run-k12-token" class="btn ghost" type="button">粘贴 token 执行</button>
         <button id="btn-clear-k12-history" class="btn ghost" type="button">清空 K12 历史</button>

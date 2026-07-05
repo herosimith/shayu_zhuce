@@ -38,6 +38,7 @@
       exportCurrentSessionJson,
       readChatGptAccessTokenInfo,
       runK12WorkspaceRedeem,
+      runK12WorkspaceAutoRegister,
       clearK12WorkspaceHistory,
       pollExternalRedeemQueue,
       retryExternalRedeemQueueItem,
@@ -1120,6 +1121,13 @@
             throw new Error('K12 Workspace 兑换能力未接入。');
           }
           return await runK12WorkspaceRedeem(message.payload || {});
+        }
+
+        case 'RUN_K12_WORKSPACE_AUTO_REGISTER': {
+          if (typeof runK12WorkspaceAutoRegister !== 'function') {
+            throw new Error('K12 Workspace 自动注册能力未接入。');
+          }
+          return await runK12WorkspaceAutoRegister(message.payload || {});
         }
 
         case 'CLEAR_K12_WORKSPACE_HISTORY': {

@@ -4,9 +4,242 @@
 })(typeof self !== 'undefined' ? self : globalThis, function createK12WorkspaceModule() {
   const DEFAULT_WORKSPACE_ID = '631e1603-06cf-4f0b-b79b-d09fbfcfe98d';
   const HISTORY_LIMIT = 80;
+  const ICLOUD_API_MODE_NORMAL = 'normal';
+  const ICLOUD_API_MODE_TAOBAO = 'taobao';
+  const ICLOUD_API_MODE_HOTMAIL = 'hotmail';
+  const TAOBAO_FEED_API_URL = 'https://assurivo.com/console/feed.php';
 
   function normalizeString(value = '') {
     return String(value || '').trim();
+  }
+
+  function normalizeEmail(value = '') {
+    return normalizeString(value).toLowerCase();
+  }
+
+  function isEmail(value = '') {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+  }
+
+  function normalizeUrl(value = '') {
+    const raw = normalizeString(value);
+    if (!raw) {
+      return '';
+    }
+    try {
+      const parsed = new URL(raw);
+      return /^https?:$/i.test(parsed.protocol) ? parsed.toString() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function normalizeApiMode(value = '') {
+    const normalized = normalizeString(value).toLowerCase();
+    if (normalized === ICLOUD_API_MODE_HOTMAIL || normalized === 'outlook' || normalized === 'microsoft') {
+      return ICLOUD_API_MODE_HOTMAIL;
+    }
+    return normalized === ICLOUD_API_MODE_TAOBAO ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL;
+  }
+
+  function isTaobaoQueryCode(value = '') {
+    const text = normalizeString(value);
+    return Boolean(text)
+      && !/^https?:\/\//i.test(text)
+      && !/^[^@\s]+@[^@\s]+\.[^\s@]+$/.test(text)
+      && /^[A-Za-z0-9_-]{6,}$/.test(text);
+  }
+
+  function buildTaobaoVerificationUrl(email = '', queryCode = '') {
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedCode = normalizeString(queryCode);
+    if (!normalizedEmail || !normalizedCode) {
+      return '';
+    }
+    const params = new URLSearchParams({
+      mail: normalizedEmail,
+      pwd: normalizedCode,
+      limit: '5',
+    });
+    return `${TAOBAO_FEED_API_URL}?${params.toString()}`;
+  }
+
+  function makeEntryId(email = '', index = 0) {
+    const safeEmail = normalizeEmail(email).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return `k12-pool-${safeEmail || 'entry'}-${index + 1}`;
+  }
+
+  function normalizePoolCredential(rawValue = '', mode = ICLOUD_API_MODE_NORMAL, email = '') {
+    const credential = normalizeString(rawValue);
+    const normalizedMode = normalizeApiMode(mode);
+    if (!credential) {
+      return { apiMode: normalizedMode, verificationUrl: '', queryCode: '', password: '', clientId: '', refreshToken: '' };
+    }
+    const hotmailParts = credential.split('----').map((part) => normalizeString(part));
+    if ((normalizedMode === ICLOUD_API_MODE_HOTMAIL || hotmailParts.length >= 3) && hotmailParts.length >= 3) {
+      const password = hotmailParts[0] || '';
+      const clientId = hotmailParts[1] || '';
+      const refreshToken = hotmailParts.slice(2).join('----').trim();
+      if (clientId && refreshToken) {
+        return { apiMode: ICLOUD_API_MODE_HOTMAIL, verificationUrl: '', queryCode: '', password, clientId, refreshToken };
+      }
+    }
+    const verificationUrl = normalizeUrl(credential);
+    if (verificationUrl) {
+      let queryCode = '';
+      try {
+        const parsed = new URL(verificationUrl);
+        const host = String(parsed.hostname || '').toLowerCase();
+        if (host === 'assurivo.com' || host.endsWith('.assurivo.com')) {
+          queryCode = normalizeString(parsed.searchParams.get('pwd') || '');
+        }
+      } catch {
+        queryCode = '';
+      }
+      return {
+        apiMode: queryCode ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL,
+        verificationUrl,
+        queryCode,
+        password: '',
+        clientId: '',
+        refreshToken: '',
+      };
+    }
+    if (normalizedMode === ICLOUD_API_MODE_TAOBAO || isTaobaoQueryCode(credential)) {
+      return {
+        apiMode: ICLOUD_API_MODE_TAOBAO,
+        verificationUrl: buildTaobaoVerificationUrl(email, credential),
+        queryCode: credential,
+        password: '',
+        clientId: '',
+        refreshToken: '',
+      };
+    }
+    return { apiMode: normalizedMode, verificationUrl: '', queryCode: '', password: '', clientId: '', refreshToken: '' };
+  }
+
+  function normalizeK12EmailPoolEntries(value = [], options = {}) {
+    const mode = normalizeApiMode(options?.mode || ICLOUD_API_MODE_NORMAL);
+    const source = Array.isArray(value) ? value : [];
+    const seen = new Set();
+    const entries = [];
+    source.forEach((rawEntry, index) => {
+      const entry = rawEntry && typeof rawEntry === 'object' ? rawEntry : { email: rawEntry };
+      const rawEmail = normalizeString(entry.email || '');
+      const splitParts = rawEmail.includes('----') ? rawEmail.split('----') : [];
+      const email = normalizeEmail(splitParts.length ? splitParts.shift() : rawEmail);
+      const parsedCredential = normalizePoolCredential(splitParts.join('----'), mode, email);
+      const clientId = normalizeString(entry.clientId || entry.client_id || parsedCredential.clientId || '');
+      const refreshToken = normalizeString(entry.refreshToken || entry.refresh_token || entry.token || parsedCredential.refreshToken || '');
+      const hasHotmailCredential = Boolean(clientId && refreshToken);
+      const apiMode = hasHotmailCredential
+        ? ICLOUD_API_MODE_HOTMAIL
+        : normalizeApiMode(entry.apiMode || parsedCredential.apiMode || mode);
+      const queryCode = apiMode === ICLOUD_API_MODE_HOTMAIL
+        ? ''
+        : normalizeString(entry.queryCode || entry.pwd || parsedCredential.queryCode || '');
+      const verificationUrl = apiMode === ICLOUD_API_MODE_HOTMAIL
+        ? ''
+        : normalizeUrl(
+          entry.verificationUrl
+          || entry.url
+          || entry.mailUrl
+          || parsedCredential.verificationUrl
+          || (apiMode === ICLOUD_API_MODE_TAOBAO && queryCode ? buildTaobaoVerificationUrl(email, queryCode) : '')
+        );
+      if (!isEmail(email) || seen.has(email)) {
+        return;
+      }
+      seen.add(email);
+      entries.push({
+        id: normalizeString(entry.id) || makeEntryId(email, entries.length || index),
+        email,
+        enabled: entry.enabled !== undefined ? Boolean(entry.enabled) : true,
+        used: Boolean(entry.used),
+        note: normalizeString(entry.note || (apiMode === ICLOUD_API_MODE_HOTMAIL ? 'Hotmail' : (apiMode === ICLOUD_API_MODE_TAOBAO ? '淘宝版' : (verificationUrl ? 'iCloud API' : '')))),
+        apiMode,
+        queryCode: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : queryCode,
+        password: apiMode === ICLOUD_API_MODE_HOTMAIL ? normalizeString(entry.password || parsedCredential.password || '') : '',
+        clientId: apiMode === ICLOUD_API_MODE_HOTMAIL ? clientId : '',
+        refreshToken: apiMode === ICLOUD_API_MODE_HOTMAIL ? refreshToken : '',
+        verificationUrl,
+        lastUsedAt: Number.isFinite(Number(entry.lastUsedAt)) ? Number(entry.lastUsedAt) : 0,
+        lastError: normalizeString(entry.lastError || ''),
+        accessTokenCheck: entry.accessTokenCheck && typeof entry.accessTokenCheck === 'object'
+          ? entry.accessTokenCheck
+          : null,
+      });
+    });
+    return entries;
+  }
+
+  function parseK12EmailPoolText(text = '', options = {}) {
+    const mode = normalizeApiMode(options?.mode || ICLOUD_API_MODE_NORMAL);
+    const existingEntries = normalizeK12EmailPoolEntries(options?.existingEntries || []);
+    const existingByEmail = new Map(existingEntries.map((entry) => [entry.email, entry]));
+    const lines = normalizeString(text).split(/\r?\n/).map((line) => normalizeString(line)).filter(Boolean);
+    const parsed = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      let source = line;
+      if (!line.includes('----') && isEmail(line)) {
+        const next = normalizeString(lines[index + 1] || '');
+        if (next && (normalizeUrl(next) || isTaobaoQueryCode(next))) {
+          source = `${line}----${next}`;
+          index += 1;
+        }
+      }
+      const candidate = normalizeK12EmailPoolEntries([{ email: source }], { mode })[0] || null;
+      if (!candidate) {
+        continue;
+      }
+      const previous = existingByEmail.get(candidate.email) || {};
+      parsed.push({
+        ...candidate,
+        id: previous.id || candidate.id || makeEntryId(candidate.email, parsed.length),
+        enabled: previous.enabled !== undefined ? Boolean(previous.enabled) : candidate.enabled !== false,
+        used: Boolean(previous.used),
+        note: previous.note || candidate.note || '',
+        lastUsedAt: Number(previous.lastUsedAt) || 0,
+        lastError: normalizeString(previous.lastError || ''),
+        accessTokenCheck: previous.accessTokenCheck || null,
+      });
+    }
+    return normalizeK12EmailPoolEntries(parsed, { mode });
+  }
+
+  function serializeK12EmailPoolEntries(entries = []) {
+    return normalizeK12EmailPoolEntries(entries).map((entry) => {
+      if (entry.apiMode === ICLOUD_API_MODE_HOTMAIL) {
+        return `${entry.email}----${entry.password || ''}----${entry.clientId || ''}----${entry.refreshToken || ''}`;
+      }
+      if (entry.apiMode === ICLOUD_API_MODE_TAOBAO && entry.queryCode) {
+        return `${entry.email}----${entry.queryCode}`;
+      }
+      return entry.verificationUrl ? `${entry.email}----${entry.verificationUrl}` : entry.email;
+    }).filter(Boolean).join('\n');
+  }
+
+  function pickUnusedK12EmailPoolEntry(entries = []) {
+    const normalizedEntries = normalizeK12EmailPoolEntries(entries);
+    return normalizedEntries.find((entry) => entry.enabled !== false && !entry.used) || null;
+  }
+
+  function markK12EmailPoolEntryUsed(entries = [], email = '', options = {}) {
+    const targetEmail = normalizeEmail(email);
+    const now = Number(options?.lastUsedAt) || Date.now();
+    return normalizeK12EmailPoolEntries(entries).map((entry) => {
+      if (entry.email !== targetEmail) {
+        return entry;
+      }
+      return {
+        ...entry,
+        used: options?.used === false ? false : true,
+        lastUsedAt: now,
+        lastError: normalizeString(options?.lastError || ''),
+        accessTokenCheck: options?.accessTokenCheck || entry.accessTokenCheck || null,
+      };
+    });
   }
 
   function extractAccessToken(rawValue = '') {
@@ -245,6 +478,12 @@
     clearK12WorkspaceHistory,
     decodeAccessTokenInfo,
     extractAccessToken,
+    markK12EmailPoolEntryUsed,
+    normalizeApiMode,
+    normalizeK12EmailPoolEntries,
+    parseK12EmailPoolText,
+    pickUnusedK12EmailPoolEntry,
     runK12WorkspaceRedeem,
+    serializeK12EmailPoolEntries,
   };
 });

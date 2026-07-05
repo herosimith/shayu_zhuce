@@ -51,7 +51,15 @@
     exportChatgptAc: document.getElementById('btn-export-chatgpt-ac'),
     k12WorkspaceStatus: document.getElementById('k12-workspace-status'),
     k12WorkspaceId: document.getElementById('input-k12-workspace-id'),
+    k12IcloudApiModeNormal: document.getElementById('input-k12-api-mode-normal'),
+    k12IcloudApiModeTaobao: document.getElementById('input-k12-api-mode-taobao'),
+    k12IcloudApiModeHotmail: document.getElementById('input-k12-api-mode-hotmail'),
+    k12PoolFormatHint: document.getElementById('k12-pool-format-hint'),
+    k12EmailPool: document.getElementById('input-k12-email-pool'),
+    k12PoolSummary: document.getElementById('k12-pool-summary'),
+    k12PoolList: document.getElementById('k12-pool-list'),
     k12AccessToken: document.getElementById('input-k12-access-token'),
+    runK12AutoRegister: document.getElementById('btn-run-k12-auto-register'),
     runK12CurrentAc: document.getElementById('btn-run-k12-current-ac'),
     runK12Token: document.getElementById('btn-run-k12-token'),
     clearK12History: document.getElementById('btn-clear-k12-history'),
@@ -127,6 +135,7 @@
   let chatgptAcExpanded = false;
   let loginSecurityConfigDirty = false;
   let k12ConfigDirty = false;
+  let k12TokenDirty = false;
   let externalRedeemConfigDirty = false;
   let feishuConfigDirty = false;
   let multiThreadSyncTimer = 0;
@@ -424,6 +433,13 @@
     return els.icloudApiModeTaobao?.checked ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL;
   }
 
+  function getSelectedK12IcloudApiMode() {
+    if (els.k12IcloudApiModeHotmail?.checked) {
+      return ICLOUD_API_MODE_HOTMAIL;
+    }
+    return els.k12IcloudApiModeTaobao?.checked ? ICLOUD_API_MODE_TAOBAO : ICLOUD_API_MODE_NORMAL;
+  }
+
   function getIcloudApiModeLabel(mode = '') {
     const normalized = normalizeIcloudApiMode(mode);
     if (normalized === ICLOUD_API_MODE_HOTMAIL) return 'Hotmail';
@@ -471,6 +487,27 @@
         [ICLOUD_API_MODE_NORMAL]: '普通版：每行 邮箱----完整接口URL，也兼容下一行单独放接口URL。',
       };
       els.poolFormatHint.textContent = hints[normalized] || hints[ICLOUD_API_MODE_NORMAL];
+    }
+  }
+
+  function applyK12IcloudApiModeUi(mode = ICLOUD_API_MODE_NORMAL) {
+    const normalized = normalizeIcloudApiMode(mode);
+    if (els.k12IcloudApiModeNormal) {
+      els.k12IcloudApiModeNormal.checked = normalized === ICLOUD_API_MODE_NORMAL;
+    }
+    if (els.k12IcloudApiModeTaobao) {
+      els.k12IcloudApiModeTaobao.checked = normalized === ICLOUD_API_MODE_TAOBAO;
+    }
+    if (els.k12IcloudApiModeHotmail) {
+      els.k12IcloudApiModeHotmail.checked = normalized === ICLOUD_API_MODE_HOTMAIL;
+    }
+    if (els.k12PoolFormatHint) {
+      const hints = {
+        [ICLOUD_API_MODE_TAOBAO]: '淘宝版：每行 邮箱----邮件查询码，例如 baptism_gators40@icloud.com----查询码；后台会自动请求 assurivo JSON。',
+        [ICLOUD_API_MODE_HOTMAIL]: 'Hotmail：每行 邮箱----密码----client_id----refresh_token；取码靠 client_id 和 refresh_token，密码只用于记录。',
+        [ICLOUD_API_MODE_NORMAL]: '普通版：每行 邮箱----完整接口URL，也兼容下一行单独放接口URL。',
+      };
+      els.k12PoolFormatHint.textContent = hints[normalized] || hints[ICLOUD_API_MODE_NORMAL];
     }
   }
 
@@ -1068,8 +1105,70 @@
     return parsePoolText(DEFAULT_POOL_TEXT, { existingByEmail: new Map() });
   }
 
+  function getK12ExistingEntryMap() {
+    const entries = Array.isArray(state?.k12EmailPoolEntries) ? state.k12EmailPoolEntries : [];
+    const map = new Map();
+    entries.forEach((entry) => {
+      const email = normalizeEmail(entry?.email).toLowerCase();
+      if (email) {
+        map.set(email, entry);
+      }
+    });
+    return map;
+  }
+
+  function getK12PoolEntriesFromInput() {
+    const inputText = String(els.k12EmailPool?.value || '');
+    const parsed = parsePoolText(inputText, {
+      mode: getSelectedK12IcloudApiMode(),
+      existingByEmail: getK12ExistingEntryMap(),
+    });
+    if (parsed.length) {
+      return parsed;
+    }
+    if (inputText.trim() === '') {
+      return [];
+    }
+    return Array.isArray(state?.k12EmailPoolEntries)
+      ? parsePoolText(entriesToText(state.k12EmailPoolEntries), {
+        mode: normalizeIcloudApiMode(state?.k12IcloudApiMode || ICLOUD_API_MODE_NORMAL),
+        existingByEmail: getK12ExistingEntryMap(),
+      })
+      : [];
+  }
+
+  function getK12StateEntries() {
+    const entries = Array.isArray(state?.k12EmailPoolEntries)
+      ? state.k12EmailPoolEntries.filter((entry) => isEmail(entry?.email))
+      : [];
+    if (entries.length) {
+      return entries.map((entry, index) => ({
+        ...entry,
+        id: String(entry?.id || makeEntryId(entry?.email, index)).trim(),
+        email: normalizeEmail(entry?.email),
+        enabled: entry?.enabled !== false,
+        used: Boolean(entry?.used),
+        apiMode: normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : (entry?.queryCode ? ICLOUD_API_MODE_TAOBAO : ''))),
+        queryCode: normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : '')) === ICLOUD_API_MODE_HOTMAIL ? '' : String(entry?.queryCode || '').trim(),
+        password: normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : '')) === ICLOUD_API_MODE_HOTMAIL ? String(entry?.password || '').trim() : '',
+        clientId: normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : '')) === ICLOUD_API_MODE_HOTMAIL ? String(entry?.clientId || '').trim() : '',
+        refreshToken: normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : '')) === ICLOUD_API_MODE_HOTMAIL ? String(entry?.refreshToken || '').trim() : '',
+        verificationUrl: normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : '')) === ICLOUD_API_MODE_HOTMAIL ? '' : normalizeUrl(entry?.verificationUrl || entry?.url || entry?.mailUrl || ''),
+        lastUsedAt: Number(entry?.lastUsedAt) || 0,
+        lastError: String(entry?.lastError || '').trim(),
+        accessTokenCheck: entry?.accessTokenCheck || null,
+      }));
+    }
+    const text = String(state?.k12EmailPoolText || '').trim();
+    return text ? parsePoolText(text, {
+      mode: normalizeIcloudApiMode(state?.k12IcloudApiMode || ICLOUD_API_MODE_NORMAL),
+      existingByEmail: new Map(),
+    }) : [];
+  }
+
   function buildSettingsPayload() {
     const entries = getPoolEntriesFromInput();
+    const k12Entries = getK12PoolEntriesFromInput();
     return {
       activeFlowId: 'openai',
       panelMode: CHECKOUT_CONVERSION,
@@ -1082,6 +1181,9 @@
       externalRedeemEnabled: Boolean(els.externalRedeemEnabled.checked),
       chatgptTotpAutoEnable: Boolean(els.chatgptTotpAutoEnable?.checked),
       k12WorkspaceId: String(els.k12WorkspaceId?.value || '').trim() || K12_DEFAULT_WORKSPACE_ID,
+      k12IcloudApiMode: getSelectedK12IcloudApiMode(),
+      k12EmailPoolText: entriesToText(k12Entries),
+      k12EmailPoolEntries: k12Entries,
       externalRedeemBaseUrl: normalizeUrl(els.externalRedeemBaseUrl.value) || EXTERNAL_REDEEM_DEFAULT_BASE_URL,
       externalRedeemApiKey: String(els.externalRedeemApiKey.value || '').trim(),
       externalRedeemCdkeyPoolText: normalizeExternalRedeemCdkeyPoolText(els.externalRedeemCdkeys.value),
@@ -1641,15 +1743,59 @@
     return item.ok ? 'success' : 'failed';
   }
 
+  function renderK12Pool(entries = getK12StateEntries()) {
+    if (!els.k12PoolSummary || !els.k12PoolList) {
+      return;
+    }
+    const enabled = entries.filter((entry) => entry.enabled !== false);
+    const unused = enabled.filter((entry) => !entry.used);
+    els.k12PoolSummary.textContent = `${entries.length} 个邮箱 / ${enabled.length} 个启用 / ${unused.length} 个未用`;
+    if (!entries.length) {
+      els.k12PoolList.innerHTML = '<div class="pool-item">暂无 K12 邮箱</div>';
+      return;
+    }
+    els.k12PoolList.innerHTML = entries.map((entry, index) => {
+      const mode = normalizeIcloudApiMode(entry.apiMode || state?.k12IcloudApiMode || ICLOUD_API_MODE_NORMAL);
+      const statusClass = entry.used ? 'skipped' : 'success';
+      const statusLabel = entry.used ? '已用' : '未用';
+      const credential = mode === ICLOUD_API_MODE_HOTMAIL
+        ? [
+          entry.password ? '有密码记录' : '',
+          entry.clientId ? '有 client_id' : '',
+          entry.refreshToken ? '有 refresh_token' : '',
+        ].filter(Boolean).join(' / ')
+        : (mode === ICLOUD_API_MODE_TAOBAO
+          ? (entry.queryCode ? `查询码：${entry.queryCode}` : '缺少查询码')
+          : (entry.verificationUrl || '缺少接口 URL'));
+      const lastError = String(entry.lastError || '').trim();
+      return `
+        <div class="pool-item">
+          <div class="pool-head">
+            <strong>${index + 1}. ${htmlEscape(entry.email)}</strong>
+            <span class="badge ${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="pool-meta">${htmlEscape(getIcloudApiModeLabel(mode))} / ${htmlEscape(credential || '-')}</div>
+          ${entry.lastUsedAt ? `<div class="pool-meta">上次使用：${htmlEscape(formatDateTime(entry.lastUsedAt))}</div>` : ''}
+          ${lastError ? `<div class="pool-meta">原因：${htmlEscape(lastError)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
   function renderK12Workspace() {
     if (!els.k12WorkspaceHistory || !els.k12WorkspaceStatus) {
       return;
     }
     const last = state?.k12WorkspaceLastResult || null;
     const history = getK12WorkspaceHistory();
-    els.k12WorkspaceStatus.textContent = last
+    const autoStatus = String(state?.k12WorkspaceAutoStatus || '').trim();
+    els.k12WorkspaceStatus.textContent = state?.k12WorkspaceAutoRunning
+      ? '自动注册执行中...'
+      : (autoStatus && autoStatus !== 'idle' && !last
+        ? autoStatus
+        : (last
       ? `${getK12WorkspaceStatusLabel(last)} / ${formatDateTime(last.updatedAt)}`
-      : (history.length ? `${history.length} 条历史` : '未执行');
+          : (history.length ? `${history.length} 条历史` : '未执行')));
 
     if (!history.length) {
       els.k12WorkspaceHistory.innerHTML = '<div class="redeem-item">暂无 K12 记录</div>';
@@ -1874,6 +2020,16 @@
     }
     if (!k12ConfigDirty && els.k12WorkspaceId) {
       els.k12WorkspaceId.value = String(state?.k12WorkspaceId || els.k12WorkspaceId.value || K12_DEFAULT_WORKSPACE_ID);
+      const k12Entries = getK12StateEntries();
+      applyK12IcloudApiModeUi(state?.k12IcloudApiMode || k12Entries.find((entry) => entry.apiMode)?.apiMode || ICLOUD_API_MODE_NORMAL);
+      if (els.k12EmailPool) {
+        els.k12EmailPool.value = entriesToText(k12Entries);
+      }
+    } else {
+      applyK12IcloudApiModeUi(getSelectedK12IcloudApiMode());
+    }
+    if (!k12TokenDirty && els.k12AccessToken) {
+      els.k12AccessToken.value = String(state?.k12WorkspaceAccessTokenDraft || els.k12AccessToken.value || '');
     }
     if (!externalRedeemConfigDirty) {
       els.externalRedeemEnabled.checked = Boolean(state?.externalRedeemEnabled);
@@ -1892,6 +2048,7 @@
     els.currentEmail.textContent = normalizeEmail(state?.email || state?.registrationEmailState?.current || '') || '等待邮箱';
     renderPool(entries);
     renderChatGptAc();
+    renderK12Pool();
     renderK12Workspace();
     renderFeishuSyncStatus();
     renderExternalRedeemQueue();
@@ -2025,6 +2182,47 @@
         otherButton.disabled = false;
       }
       runButton.textContent = previousText || (useCurrentAc ? '使用当前 AC' : '粘贴 token 执行');
+    }
+  }
+
+  async function runK12WorkspaceAutoRegister() {
+    if (!els.runK12AutoRegister) {
+      return;
+    }
+    const previousText = els.runK12AutoRegister.textContent;
+    const buttons = [els.runK12AutoRegister, els.runK12CurrentAc, els.runK12Token].filter(Boolean);
+    buttons.forEach((button) => {
+      button.disabled = true;
+    });
+    els.runK12AutoRegister.textContent = '注册中...';
+    if (els.k12WorkspaceStatus) {
+      els.k12WorkspaceStatus.textContent = '自动注册执行中...';
+    }
+    try {
+      await saveSettings({ silent: true });
+      k12ConfigDirty = false;
+      k12TokenDirty = false;
+      const response = await sendMessage({
+        type: 'RUN_K12_WORKSPACE_AUTO_REGISTER',
+        source: 'sidepanel',
+        payload: {
+          workspaceId: String(els.k12WorkspaceId?.value || '').trim() || K12_DEFAULT_WORKSPACE_ID,
+          apiMode: getSelectedK12IcloudApiMode(),
+          emailPoolText: String(els.k12EmailPool?.value || ''),
+          emailPoolEntries: getK12PoolEntriesFromInput(),
+        },
+      }, 360000);
+      state = response?.state || state;
+      renderState();
+      showToast(response?.ok ? 'K12 自动注册并执行完成' : 'K12 自动注册执行失败', response?.ok ? 'success' : 'error', 9000);
+    } catch (error) {
+      renderK12Workspace();
+      showToast(error.message || 'K12 自动注册执行失败', 'error', 10000);
+    } finally {
+      buttons.forEach((button) => {
+        button.disabled = false;
+      });
+      els.runK12AutoRegister.textContent = previousText || '注册并执行 K12';
     }
   }
 
@@ -2941,6 +3139,11 @@
     renderChatGptAc();
   });
   els.exportChatgptAc.addEventListener('click', exportChatGptAcCsv);
+  if (els.runK12AutoRegister) {
+    els.runK12AutoRegister.addEventListener('click', () => {
+      runK12WorkspaceAutoRegister().catch((error) => showToast(error.message || 'K12 自动注册执行失败', 'error', 10000));
+    });
+  }
   if (els.runK12CurrentAc) {
     els.runK12CurrentAc.addEventListener('click', () => {
       runK12WorkspaceRedeem(true).catch((error) => showToast(error.message || 'K12 Workspace 执行失败', 'error', 9000));
@@ -3029,15 +3232,34 @@
   });
   [
     els.k12WorkspaceId,
+    els.k12EmailPool,
+    els.k12IcloudApiModeNormal,
+    els.k12IcloudApiModeTaobao,
+    els.k12IcloudApiModeHotmail,
   ].forEach((element) => {
     if (!element) return;
     element.addEventListener('input', () => {
       k12ConfigDirty = true;
+      if (element === els.k12EmailPool) {
+        renderK12Pool(getK12PoolEntriesFromInput());
+      }
     });
     element.addEventListener('change', () => {
       k12ConfigDirty = true;
+      applyK12IcloudApiModeUi(getSelectedK12IcloudApiMode());
+      if (els.k12EmailPool) {
+        renderK12Pool(getK12PoolEntriesFromInput());
+      }
     });
   });
+  if (els.k12AccessToken) {
+    els.k12AccessToken.addEventListener('input', () => {
+      k12TokenDirty = true;
+    });
+    els.k12AccessToken.addEventListener('change', () => {
+      k12TokenDirty = true;
+    });
+  }
   [
     els.externalRedeemEnabled,
     els.externalRedeemBaseUrl,

@@ -64,6 +64,9 @@ const SLIM_STEP_DEFINITIONS = Object.freeze([
   { id: 6, order: 60, key: 'wait-registration-success', title: '等待注册成功并进入 ChatGPT', sourceId: 'chatgpt', driverId: null, command: 'wait-registration-success' },
   { id: 7, order: 70, key: 'chatgpt-ac-external-redeem', title: '检查 AC 资格并提交外部兑换', sourceId: 'chatgpt', driverId: null, command: 'chatgpt-ac-external-redeem' },
 ]);
+const K12_WORKSPACE_STEP_DEFINITIONS = Object.freeze(
+  SLIM_STEP_DEFINITIONS.filter((definition) => Number(definition?.id) <= 6)
+);
 const NORMAL_STEP_DEFINITIONS = SLIM_STEP_DEFINITIONS;
 const PLUS_STEP_DEFINITIONS = SLIM_STEP_DEFINITIONS;
 const ALL_STEP_DEFINITIONS = SLIM_STEP_DEFINITIONS;
@@ -625,6 +628,9 @@ function getStepDefinitionsForState(state = {}) {
   if (activeFlowId && activeFlowId !== DEFAULT_ACTIVE_FLOW_ID) {
     return [];
   }
+  if (state?.k12WorkspaceRunActive) {
+    return K12_WORKSPACE_STEP_DEFINITIONS;
+  }
   return SLIM_STEP_DEFINITIONS;
 }
 
@@ -820,6 +826,10 @@ const PERSISTED_SETTING_DEFAULTS = {
   externalRedeemPollSeconds: EXTERNAL_REDEEM_DEFAULT_POLL_SECONDS,
   chatgptTotpAutoEnable: false,
   chatgptTotpOptionalMigrationVersion: 1,
+  k12WorkspaceId: self.GuJumpgateK12Workspace?.DEFAULT_WORKSPACE_ID || '631e1603-06cf-4f0b-b79b-d09fbfcfe98d',
+  k12IcloudApiMode: ICLOUD_API_MODE_NORMAL,
+  k12EmailPoolText: '',
+  k12EmailPoolEntries: [],
   multiThreadEnabled: false,
   multiThreadCount: 1,
   multiThreadProfileRunnerUrl: 'http://127.0.0.1:18792',
@@ -1048,6 +1058,15 @@ const DEFAULT_STATE = {
   externalRedeemRecordsDbPath: '',
   externalRedeemRecordsLastSyncAt: 0,
   externalRedeemRecordsLastError: '',
+  k12WorkspaceLastResult: null,
+  k12WorkspaceHistory: [],
+  k12WorkspaceAutoRunning: false,
+  k12WorkspaceAutoStatus: 'idle',
+  k12WorkspaceRunActive: false,
+  k12WorkspaceAccessTokenDraft: '',
+  k12WorkspaceAccessTokenUpdatedAt: 0,
+  k12WorkspaceAutoLastEmail: '',
+  k12WorkspaceAutoLastError: '',
   multiThreadMode: 'workbench',
   multiThreadRunnerUrl: '',
   multiThreadRunnerRunId: '',
@@ -3223,6 +3242,15 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeExternalRedeemCdkeyPoolText(value);
     case 'externalRedeemPollSeconds':
       return normalizeExternalRedeemPollSeconds(value);
+    case 'k12WorkspaceId':
+      return String(value || self.GuJumpgateK12Workspace?.DEFAULT_WORKSPACE_ID || '631e1603-06cf-4f0b-b79b-d09fbfcfe98d').trim()
+        || (self.GuJumpgateK12Workspace?.DEFAULT_WORKSPACE_ID || '631e1603-06cf-4f0b-b79b-d09fbfcfe98d');
+    case 'k12IcloudApiMode':
+      return normalizeIcloudApiModeValue(value);
+    case 'k12EmailPoolText':
+      return String(value || '').trim();
+    case 'k12EmailPoolEntries':
+      return normalizeCustomEmailPoolEntryObjects(value);
     case 'multiThreadCount':
       return normalizeMultiThreadCount(value);
     case 'feishuAppId':
@@ -3642,8 +3670,33 @@ async function initializeSessionStorageAccess() {
   }
 }
 
+function redactStateLogPreview(value, depth = 0) {
+  if (depth > 4) {
+    return '[nested]';
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 5).map((item) => redactStateLogPreview(item, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      const normalizedKey = String(key || '').toLowerCase();
+      if (/(token|secret|password|authorization|apikey|api_key|refresh)/.test(normalizedKey)) {
+        return [key, item ? '[redacted]' : item];
+      }
+      return [key, redactStateLogPreview(item, depth + 1)];
+    }));
+  }
+  return value;
+}
+
 async function setState(updates) {
-  console.log(LOG_PREFIX, 'storage.set:', JSON.stringify(updates).slice(0, 200));
+  let preview = '{}';
+  try {
+    preview = JSON.stringify(redactStateLogPreview(updates)).slice(0, 200);
+  } catch (_) {
+    preview = '[unserializable]';
+  }
+  console.log(LOG_PREFIX, 'storage.set:', preview);
   if (Object.keys(updates || {}).length > 0) {
     const currentSessionState = await chrome.storage.session.get(null);
     const sessionUpdates = buildStatePatchWithRuntimeState({
@@ -15612,11 +15665,15 @@ async function runAutoSequenceFromNode(startNodeId, context = {}) {
   if (!normalizedStartNodeId || !getAutoRunWorkflowNodeIds(state).includes(normalizedStartNodeId)) {
     throw new Error(`自动运行无法从未知节点继续：${startNodeId}`);
   }
+  const runner = () => runAutoSequenceFromNodeGraph(normalizedStartNodeId, context);
+  if (context?.skipCheckoutConversionProxy || context?.k12Workspace) {
+    return runner();
+  }
   if (!context?.continued) {
     await selectNextCheckoutConversionProxyForAutoRun(context);
   }
   return runWithCheckoutConversionProxyDuringPluginUse(
-    () => runAutoSequenceFromNodeGraph(normalizedStartNodeId, context),
+    runner,
     {
       startLog: '全流程代理已启用：本轮插件执行期间，浏览器网络都会走该代理。',
       finishReason: '本轮自动运行结束',
@@ -16506,6 +16563,307 @@ function resolveBoundEmailForReloginState(state = {}) {
   ).trim();
 }
 
+function getK12WorkspaceDefaultId() {
+  return self.GuJumpgateK12Workspace?.DEFAULT_WORKSPACE_ID || '631e1603-06cf-4f0b-b79b-d09fbfcfe98d';
+}
+
+function buildK12WorkflowNodeStatuses() {
+  return Object.fromEntries(
+    K12_WORKSPACE_STEP_DEFINITIONS
+      .map((definition) => String(definition?.key || '').trim())
+      .filter(Boolean)
+      .map((nodeId) => [nodeId, 'pending'])
+  );
+}
+
+function buildK12EmailPoolFromInput(options = {}, state = {}) {
+  const k12Module = self.GuJumpgateK12Workspace;
+  const mode = normalizeIcloudApiModeValue(options?.apiMode || state?.k12IcloudApiMode || ICLOUD_API_MODE_NORMAL);
+  const entriesFromPayload = k12Module?.normalizeK12EmailPoolEntries?.(options?.emailPoolEntries || [], { mode }) || [];
+  if (entriesFromPayload.length) {
+    return {
+      mode,
+      entries: entriesFromPayload,
+      text: k12Module?.serializeK12EmailPoolEntries?.(entriesFromPayload) || '',
+    };
+  }
+  const rawText = String(options?.emailPoolText ?? state?.k12EmailPoolText ?? '').trim();
+  const entries = k12Module?.parseK12EmailPoolText?.(rawText, {
+    mode,
+    existingEntries: state?.k12EmailPoolEntries || [],
+  }) || [];
+  return {
+    mode,
+    entries,
+    text: k12Module?.serializeK12EmailPoolEntries?.(entries) || rawText,
+  };
+}
+
+function buildK12RuntimePoolForSingleEmail(entry = null) {
+  if (!entry?.email) {
+    return [];
+  }
+  return normalizeCustomEmailPoolEntryObjects([{
+    id: entry.id || `k12-runtime-${entry.email}`,
+    email: entry.email,
+    enabled: true,
+    used: false,
+    note: entry.note || 'K12 自动注册',
+    apiMode: entry.apiMode || ICLOUD_API_MODE_NORMAL,
+    queryCode: entry.queryCode || '',
+    password: entry.password || '',
+    clientId: entry.clientId || '',
+    refreshToken: entry.refreshToken || '',
+    verificationUrl: entry.verificationUrl || '',
+  }]);
+}
+
+function buildK12MainStateSnapshot(state = {}) {
+  const keys = [
+    'activeFlowId',
+    'panelMode',
+    'plusModeEnabled',
+    'plusPaymentMethod',
+    'plusAccountAccessStrategy',
+    'externalRedeemEnabled',
+    'mailProvider',
+    'emailGenerator',
+    'icloudApiMode',
+    'customEmailPool',
+    'customEmailPoolEntries',
+    'customMailProviderPool',
+    'email',
+    'password',
+    'registrationEmailState',
+    'accountIdentifierType',
+    'accountIdentifier',
+    'signupMethod',
+    'resolvedSignupMethod',
+    'phoneVerificationEnabled',
+    'phoneSignupReloginAfterBindEmailEnabled',
+    'nodeStatuses',
+    'currentNodeId',
+    'skipOpenChatgptCookieCleanupOnce',
+    'preserveOpenChatgptCookiesOnce',
+  ];
+  const snapshot = {};
+  keys.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(state, key)) {
+      snapshot[key] = state[key];
+    }
+  });
+  return snapshot;
+}
+
+async function runK12WorkspaceAutoRegister(options = {}) {
+  const k12Module = self.GuJumpgateK12Workspace;
+  if (!k12Module?.runK12WorkspaceRedeem) {
+    throw new Error('K12 Workspace 自动注册能力未接入。');
+  }
+  const initialState = await getState();
+  if (autoRunActive || initialState.autoRunning || initialState.k12WorkspaceAutoRunning) {
+    throw new Error('当前已有自动任务在运行，请先停止或等待完成。');
+  }
+
+  const pool = buildK12EmailPoolFromInput(options, initialState);
+  const selectedEntry = k12Module.pickUnusedK12EmailPoolEntry?.(pool.entries) || null;
+  if (!selectedEntry?.email) {
+    throw new Error('K12 邮箱池没有未用邮箱，请先补充 K12 邮箱池或清空已用。');
+  }
+
+  const workspaceId = String(options?.workspaceId || initialState.k12WorkspaceId || getK12WorkspaceDefaultId()).trim() || getK12WorkspaceDefaultId();
+  const sessionId = createAutoRunSessionId();
+  const snapshot = buildK12MainStateSnapshot(initialState);
+  const runtimeEntries = buildK12RuntimePoolForSingleEmail(selectedEntry);
+  const k12NodeStatuses = buildK12WorkflowNodeStatuses();
+  let finalStatus = 'failed';
+  let successPayload = null;
+
+  clearStopRequest();
+  autoRunActive = true;
+  autoRunCurrentRun = 1;
+  autoRunTotalRuns = 1;
+  autoRunAttemptRun = 1;
+  autoRunSessionId = sessionId;
+
+  await setPersistentSettings({
+    k12WorkspaceId: workspaceId,
+    k12IcloudApiMode: pool.mode,
+    k12EmailPoolText: pool.text,
+    k12EmailPoolEntries: pool.entries,
+  });
+  await setState({
+    ...getAutoRunStatusPayload('running', { currentRun: 1, totalRuns: 1, attemptRun: 1, sessionId }),
+    k12WorkspaceId: workspaceId,
+    k12IcloudApiMode: pool.mode,
+    k12EmailPoolText: pool.text,
+    k12EmailPoolEntries: pool.entries,
+    k12WorkspaceAutoRunning: true,
+    k12WorkspaceAutoStatus: 'running',
+    k12WorkspaceRunActive: true,
+    k12WorkspaceAutoLastEmail: selectedEntry.email,
+    k12WorkspaceAutoLastError: '',
+    activeFlowId: DEFAULT_ACTIVE_FLOW_ID,
+    panelMode: DEFAULT_PANEL_MODE,
+    plusModeEnabled: false,
+    externalRedeemEnabled: false,
+    phoneVerificationEnabled: false,
+    phoneSignupReloginAfterBindEmailEnabled: false,
+    signupMethod: 'email',
+    resolvedSignupMethod: 'email',
+    mailProvider: ICLOUD_API_PROVIDER,
+    icloudApiMode: selectedEntry.apiMode || pool.mode || ICLOUD_API_MODE_NORMAL,
+    emailGenerator: CUSTOM_EMAIL_POOL_GENERATOR,
+    customEmailPool: [selectedEntry.email],
+    customEmailPoolEntries: runtimeEntries,
+    customMailProviderPool: [],
+    email: null,
+    password: null,
+    registrationEmailState: { ...DEFAULT_REGISTRATION_EMAIL_STATE },
+    accountIdentifierType: null,
+    accountIdentifier: '',
+    currentNodeId: 'open-chatgpt',
+    nodeStatuses: k12NodeStatuses,
+    skipOpenChatgptCookieCleanupOnce: true,
+    preserveOpenChatgptCookiesOnce: true,
+  });
+  broadcastDataUpdate({
+    k12WorkspaceAutoRunning: true,
+    k12WorkspaceAutoStatus: 'running',
+    k12WorkspaceAutoLastEmail: selectedEntry.email,
+    k12EmailPoolEntries: pool.entries,
+    k12EmailPoolText: pool.text,
+  });
+
+  await addLog(`K12 自动注册：已选择 ${selectedEntry.email}，开始注册并准备回填 AC。`, 'info');
+
+  try {
+    await runAutoSequenceFromNode('open-chatgpt', {
+      targetRun: 1,
+      totalRuns: 1,
+      attemptRuns: 1,
+      k12Workspace: true,
+      skipCheckoutConversionProxy: true,
+    });
+
+    const sessionState = await readCurrentChatGptSessionForExport({}).catch((error) => {
+      throw new Error(`K12 自动注册已完成但读取 AC 失败：${error?.message || error}`);
+    });
+    const accessToken = k12Module.extractAccessToken(sessionState?.accessToken || '');
+    if (!accessToken) {
+      throw new Error('K12 自动注册已完成但未读取到有效 AC。');
+    }
+    await setState({
+      k12WorkspaceAccessTokenDraft: accessToken,
+      k12WorkspaceAccessTokenUpdatedAt: Date.now(),
+    });
+    await addLog(`K12 自动注册：已读取 ${selectedEntry.email} 的 AC，并写入 K12 access_token 输入框。`, 'ok');
+
+    const redeemResult = await k12Module.runK12WorkspaceRedeem({
+      getState,
+      setState,
+      broadcastDataUpdate,
+      readChatGptAccessTokenInfo,
+      readCurrentChatGptSessionForExport,
+    }, {
+      workspaceId,
+      accessToken,
+      useCurrent: false,
+    });
+    if (!redeemResult?.ok) {
+      throw new Error('K12 Workspace invite 接口返回失败。');
+    }
+    const updatedPoolEntries = k12Module.markK12EmailPoolEntryUsed(pool.entries, selectedEntry.email, {
+      lastError: '',
+      accessTokenCheck: sessionState?.accessTokenCheck || null,
+    });
+    const updatedPoolText = k12Module.serializeK12EmailPoolEntries(updatedPoolEntries);
+    await setPersistentSettings({
+      k12EmailPoolEntries: updatedPoolEntries,
+      k12EmailPoolText: updatedPoolText,
+    });
+    await setState({
+      k12EmailPoolEntries: updatedPoolEntries,
+      k12EmailPoolText: updatedPoolText,
+      k12WorkspaceAutoStatus: 'completed',
+      k12WorkspaceAutoLastError: '',
+    });
+    await addLog(`K12 自动注册：${selectedEntry.email} 已完成注册并执行 K12，邮箱已标记为已用。`, 'ok');
+    finalStatus = 'completed';
+    successPayload = {
+      ok: true,
+      email: selectedEntry.email,
+      workspaceId,
+    };
+  } catch (error) {
+    const message = error?.message || String(error || '未知错误');
+    const updatedPoolEntries = k12Module.markK12EmailPoolEntryUsed(pool.entries, selectedEntry.email, {
+      used: false,
+      lastError: message,
+    });
+    const updatedPoolText = k12Module.serializeK12EmailPoolEntries(updatedPoolEntries);
+    await setPersistentSettings({
+      k12EmailPoolEntries: updatedPoolEntries,
+      k12EmailPoolText: updatedPoolText,
+    });
+    await setState({
+      k12EmailPoolEntries: updatedPoolEntries,
+      k12EmailPoolText: updatedPoolText,
+      k12WorkspaceAutoStatus: 'failed',
+      k12WorkspaceAutoLastError: message,
+    });
+    await addLog(`K12 自动注册失败：${message}`, 'error');
+    throw error;
+  } finally {
+    autoRunActive = false;
+    autoRunCurrentRun = 0;
+    autoRunTotalRuns = 1;
+    autoRunAttemptRun = 0;
+    clearCurrentAutoRunSessionId(sessionId);
+    const latest = await getState();
+    const restorePatch = {
+      ...snapshot,
+      ...getAutoRunStatusPayload('idle', { currentRun: 0, totalRuns: 1, attemptRun: 0, sessionId: 0 }),
+      k12WorkspaceRunActive: false,
+      k12WorkspaceAutoRunning: false,
+      k12WorkspaceAutoStatus: finalStatus,
+      k12WorkspaceLastResult: latest.k12WorkspaceLastResult || null,
+      k12WorkspaceHistory: Array.isArray(latest.k12WorkspaceHistory) ? latest.k12WorkspaceHistory : [],
+      k12WorkspaceAccessTokenDraft: latest.k12WorkspaceAccessTokenDraft || '',
+      k12WorkspaceAccessTokenUpdatedAt: Number(latest.k12WorkspaceAccessTokenUpdatedAt) || 0,
+      k12WorkspaceAutoLastEmail: latest.k12WorkspaceAutoLastEmail || selectedEntry.email,
+      k12WorkspaceAutoLastError: latest.k12WorkspaceAutoLastError || '',
+      k12EmailPoolEntries: latest.k12EmailPoolEntries || pool.entries,
+      k12EmailPoolText: latest.k12EmailPoolText || pool.text,
+      k12IcloudApiMode: latest.k12IcloudApiMode || pool.mode,
+      k12WorkspaceId: latest.k12WorkspaceId || workspaceId,
+    };
+    await setState(restorePatch);
+    const restored = await getState();
+    broadcastDataUpdate({
+      k12WorkspaceRunActive: false,
+      k12WorkspaceAutoRunning: false,
+      k12WorkspaceAutoStatus: finalStatus,
+      k12WorkspaceLastResult: restored.k12WorkspaceLastResult || null,
+      k12WorkspaceHistory: restored.k12WorkspaceHistory || [],
+      k12WorkspaceAccessTokenDraft: restored.k12WorkspaceAccessTokenDraft || '',
+      k12WorkspaceAccessTokenUpdatedAt: restored.k12WorkspaceAccessTokenUpdatedAt || 0,
+      k12WorkspaceAutoLastEmail: restored.k12WorkspaceAutoLastEmail || '',
+      k12WorkspaceAutoLastError: restored.k12WorkspaceAutoLastError || '',
+      k12EmailPoolEntries: restored.k12EmailPoolEntries || [],
+      k12EmailPoolText: restored.k12EmailPoolText || '',
+      k12IcloudApiMode: restored.k12IcloudApiMode || ICLOUD_API_MODE_NORMAL,
+      k12WorkspaceId: restored.k12WorkspaceId || workspaceId,
+      autoRunning: false,
+      autoRunPhase: 'idle',
+    });
+  }
+  return {
+    ...(successPayload || { ok: finalStatus === 'completed', email: selectedEntry.email, workspaceId }),
+    state: await getState(),
+  };
+}
+
 async function executeReloginBoundEmail(state = {}) {
   const visibleStep = Math.floor(Number(state?.visibleStep) || 0) || 10;
   const boundEmail = resolveBoundEmailForReloginState(state);
@@ -16584,6 +16942,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
     readChatGptAccessTokenInfo,
     readCurrentChatGptSessionForExport,
   }, options),
+  runK12WorkspaceAutoRegister: (options) => runK12WorkspaceAutoRegister(options),
   clearK12WorkspaceHistory: () => self.GuJumpgateK12Workspace?.clearK12WorkspaceHistory?.({
     getState,
     setState,
