@@ -1353,7 +1353,6 @@
     state = await sendMessage({ type: 'GET_STATE', source: 'sidepanel' }, 15000);
     renderState();
     ensureMultiThreadLogSync();
-    recoverMultiThreadRunnerLogsOnce();
   }
 
   function isMultiThreadRunnerActive(view = state) {
@@ -1386,9 +1385,7 @@
     if (multiThreadSyncInFlight) {
       return;
     }
-    const allowRecovery = !isMultiThreadRunnerActive()
-      && Number(state?.multiThreadCount || 0) > 1;
-    if (!isMultiThreadRunnerActive() && !allowRecovery) {
+    if (!isMultiThreadRunnerActive()) {
       stopMultiThreadLogSync();
       return;
     }
@@ -1433,15 +1430,6 @@
     }, MULTI_THREAD_SYNC_INTERVAL_MS);
     syncMultiThreadRunnerLogs().catch((error) => {
       console.warn('[GuJumpgate sidepanel] initial sync multi-thread logs failed:', error?.message || error);
-    });
-  }
-
-  function recoverMultiThreadRunnerLogsOnce() {
-    if (isMultiThreadRunnerActive() || Number(state?.multiThreadCount || 0) <= 1) {
-      return;
-    }
-    syncMultiThreadRunnerLogs().catch((error) => {
-      console.warn('[GuJumpgate sidepanel] recover multi-thread logs failed:', error?.message || error);
     });
   }
 
