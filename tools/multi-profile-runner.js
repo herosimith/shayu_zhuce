@@ -646,6 +646,10 @@ async function readExtensionStorageSnapshot(debugPort, extensionId) {
             'signupVerificationRuntimeStatus',
             'loginVerificationRuntimeStatus',
             'externalRedeemQueue',
+            'externalRedeemEnabled',
+            'externalRedeemBaseUrl',
+            'externalRedeemApiKey',
+            'externalRedeemCdkeyPoolText',
             'externalRedeemLastSyncAt',
             'externalRedeemLastError',
             'externalRedeemRecords',
@@ -656,6 +660,9 @@ async function readExtensionStorageSnapshot(debugPort, extensionId) {
           const sessionData = await chrome.storage.session.get(keys);
           const localData = await chrome.storage.local.get([
             'customEmailPoolEntries',
+            'externalRedeemEnabled',
+            'externalRedeemBaseUrl',
+            'externalRedeemApiKey',
             'externalRedeemCdkeyPoolText',
             'externalRedeemQueue',
             'externalRedeemRecords',
@@ -666,7 +673,14 @@ async function readExtensionStorageSnapshot(debugPort, extensionId) {
             state: sessionData || {},
             persisted: {
               customEmailPoolEntries: localData?.customEmailPoolEntries || [],
+              externalRedeemEnabled: Boolean(localData?.externalRedeemEnabled),
+              hasExternalRedeemApiKey: Boolean(String(localData?.externalRedeemApiKey || '').trim()),
+              externalRedeemBaseUrl: String(localData?.externalRedeemBaseUrl || ''),
               hasCdkeyPool: Boolean(String(localData?.externalRedeemCdkeyPoolText || '').trim()),
+              cdkeyCount: String(localData?.externalRedeemCdkeyPoolText || '')
+                .split(/\\r?\\n/)
+                .map((line) => String(line || '').trim())
+                .filter(Boolean).length,
               externalRedeemQueue: Array.isArray(localData?.externalRedeemQueue) ? localData.externalRedeemQueue : [],
               externalRedeemRecords: Array.isArray(localData?.externalRedeemRecords) ? localData.externalRedeemRecords : [],
               externalRedeemRecordsDbPath: String(localData?.externalRedeemRecordsDbPath || '')
@@ -734,6 +748,16 @@ async function readThreadExtensionSnapshot(thread = {}) {
       ? value.state.nodeStatuses
       : {},
     email: normalizeString(value?.state?.email || value?.state?.registrationEmailState?.currentEmail || thread.email || '').toLowerCase(),
+    externalRedeemEnabled: Boolean(value?.state?.externalRedeemEnabled || value?.persisted?.externalRedeemEnabled),
+    hasExternalRedeemApiKey: Boolean(
+      normalizeString(value?.state?.externalRedeemApiKey || '').trim()
+      || value?.persisted?.hasExternalRedeemApiKey
+    ),
+    externalRedeemCdkeyCount: normalizeString(value?.state?.externalRedeemCdkeyPoolText || '')
+      .split(/\r?\n/)
+      .map((line) => normalizeString(line))
+      .filter(Boolean).length || Number(value?.persisted?.cdkeyCount) || 0,
+    hasCdkeyPool: Boolean(value?.persisted?.hasCdkeyPool),
     externalRedeemQueue: Array.isArray(value?.state?.externalRedeemQueue)
       ? value.state.externalRedeemQueue
       : (Array.isArray(value?.persisted?.externalRedeemQueue) ? value.persisted.externalRedeemQueue : []),

@@ -11544,6 +11544,13 @@ async function waitForExternalRedeemFinalResult(initialItem = {}, options = {}) 
 async function executeChatGptAcExternalRedeemNode(state = {}) {
   const nodeId = 'chatgpt-ac-external-redeem';
   const expectedEmail = String(state?.email || state?.registrationEmailState?.current || '').trim();
+  const latestConfigState = await getState().catch(() => state || {});
+  const step7CdkeyCount = getExternalRedeemCdkeysFromText(latestConfigState?.externalRedeemCdkeyPoolText || '').length;
+  await addLog(
+    `步骤 7：外部兑换配置：${latestConfigState?.externalRedeemEnabled ? '已启用' : '未启用'}；API Key ${String(latestConfigState?.externalRedeemApiKey || '').trim() ? '已配置' : '未配置'}；可用 CDK ${step7CdkeyCount} 个。`,
+    step7CdkeyCount > 0 && latestConfigState?.externalRedeemEnabled && String(latestConfigState?.externalRedeemApiKey || '').trim() ? 'info' : 'warn',
+    { nodeId }
+  );
   await addLog('步骤 7：正在读取 ChatGPT AC，并检查外部兑换资格...', 'info', { nodeId });
   const result = await readChatGptAccessTokenInfo({
     promoId: 'plus-1-month-free',

@@ -73,9 +73,36 @@
     function getReservedCdkeys(state = {}) {
       return new Set(
         (Array.isArray(state?.externalRedeemQueue) ? state.externalRedeemQueue : [])
+          .filter((item) => isCdkeyReservedForThreadPlanning(item))
           .map((item) => normalizeExternalRedeemCdkey(item?.cdkey))
           .filter(Boolean)
       );
+    }
+
+    function isCdkeyReservedForThreadPlanning(item = {}) {
+      if (!normalizeExternalRedeemCdkey(item?.cdkey)) {
+        return false;
+      }
+      const status = String(item?.status || item?.redeemStatus || item?.redeem_status || '').trim().toLowerCase();
+      const transactionStatus = String(item?.transactionStatus || item?.transaction_status || '').trim().toLowerCase();
+      const text = [
+        item?.reason,
+        item?.errorMessage,
+        item?.error_message,
+        item?.displayStatus,
+        item?.display_status,
+        item?.message,
+      ].map((value) => String(value || '').trim()).filter(Boolean).join(' ').toLowerCase();
+      if (/充值失败|支付失败|付款失败|提交失败|被拒绝|无效或未购买|不能重复|已被使用|recharge\s*failed|payment\s*failed|submit\s*failed|failed|失败|rejected|not_found|cancel/.test(`${status} ${text}`)) {
+        return false;
+      }
+      if (status === 'success' || transactionStatus === 'paid') {
+        return true;
+      }
+      if (['failed', 'submit_failed', 'rejected', 'not_found', 'cancelled', 'canceled', 'error'].includes(status)) {
+        return false;
+      }
+      return item?.accepted === true || Boolean(String(item?.taskId || item?.task_id || '').trim());
     }
 
     function getAvailableCdkeys(state = {}) {
@@ -698,6 +725,9 @@
           currentNodeId: String(snapshot.currentNodeId || ''),
           autoRunPhase: String(snapshot.autoRunPhase || ''),
           autoRunning: Boolean(snapshot.autoRunning),
+          externalRedeemEnabled: snapshot.externalRedeemEnabled === true,
+          hasExternalRedeemApiKey: snapshot.hasExternalRedeemApiKey === true,
+          externalRedeemCdkeyCount: Math.max(0, Number(snapshot.externalRedeemCdkeyCount) || 0),
           verificationRuntimeStatus: snapshot.verificationRuntimeStatus && typeof snapshot.verificationRuntimeStatus === 'object'
             ? snapshot.verificationRuntimeStatus
             : null,
@@ -736,6 +766,22 @@
               message: `页面诊断失败：${diagnostics.pageError}`,
               level: 'warn',
               timestamp: bucketDiagnosticTimestamp(diagnostics.updatedAt, 15000) + 3,
+              nodeId: diagnostics.currentNodeId,
+            }]);
+          }
+          if (diagnostics.currentNodeId === 'chatgpt-ac-external-redeem') {
+            const configParts = [
+              diagnostics.externalRedeemEnabled ? '外部兑换已启用' : '外部兑换未启用',
+              diagnostics.hasExternalRedeemApiKey ? 'API Key 已配置' : 'API Key 未配置',
+              `线程 CDK 数：${diagnostics.externalRedeemCdkeyCount}`,
+            ];
+            const level = diagnostics.externalRedeemEnabled && diagnostics.hasExternalRedeemApiKey && diagnostics.externalRedeemCdkeyCount > 0
+              ? 'info'
+              : 'warn';
+            threadLogs[plan.id] = mergeThreadLogs(threadLogs[plan.id], [{
+              message: `步骤 7 配置诊断：${configParts.join('；')}${diagnostics.externalRedeemCdkeyCount <= 0 ? '；不会提交外部兑换，只会同步 AC。' : '。'}`,
+              level,
+              timestamp: bucketDiagnosticTimestamp(diagnostics.updatedAt, 15000) + 4,
               nodeId: diagnostics.currentNodeId,
             }]);
           }
