@@ -213,8 +213,20 @@ ON CONFLICT(email) DO UPDATE SET
   accepted = COALESCE(excluded.accepted, email_redeem_records.accepted),
   transaction_id = COALESCE(excluded.transaction_id, email_redeem_records.transaction_id),
   transaction_status = COALESCE(excluded.transaction_status, email_redeem_records.transaction_status),
-  reason = COALESCE(excluded.reason, email_redeem_records.reason),
-  error_message = COALESCE(excluded.error_message, email_redeem_records.error_message),
+  reason = CASE
+    WHEN lower(COALESCE(excluded.redeem_status, '')) = 'success'
+      OR lower(COALESCE(excluded.transaction_status, '')) = 'paid'
+      OR excluded.display_status LIKE '%成功%'
+    THEN excluded.reason
+    ELSE COALESCE(excluded.reason, email_redeem_records.reason)
+  END,
+  error_message = CASE
+    WHEN lower(COALESCE(excluded.redeem_status, '')) = 'success'
+      OR lower(COALESCE(excluded.transaction_status, '')) = 'paid'
+      OR excluded.display_status LIKE '%成功%'
+    THEN excluded.error_message
+    ELSE COALESCE(excluded.error_message, email_redeem_records.error_message)
+  END,
   updated_at = excluded.updated_at;
 `;
 }

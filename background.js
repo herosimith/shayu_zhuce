@@ -9052,12 +9052,8 @@ function getExternalRedeemQueueFromState(state = {}) {
     : [];
 }
 
-function hasExternalRedeemRechargeFailureSignal(item = {}) {
-  const status = String(item?.status || item?.redeemStatus || item?.redeem_status || '').trim().toLowerCase();
-  if (status === 'success') {
-    return false;
-  }
-  const text = [
+function getExternalRedeemRechargeFailureText(item = {}) {
+  return [
     item?.reason,
     item?.errorMessage,
     item?.error_message,
@@ -9065,7 +9061,18 @@ function hasExternalRedeemRechargeFailureSignal(item = {}) {
     item?.display_status,
     item?.message,
   ].map((value) => String(value || '').trim()).filter(Boolean).join(' ').toLowerCase();
-  return /充值失败|支付失败|付款失败|recharge\s*failed|br\s*recharge\s*failed|payment\s*failed|failed\s*to\s*recharge/.test(text);
+}
+
+function hasExternalRedeemRechargeFailureSignal(item = {}) {
+  const status = String(item?.status || item?.redeemStatus || item?.redeem_status || '').trim().toLowerCase();
+  const text = getExternalRedeemRechargeFailureText(item);
+  if (/充值失败|支付失败|付款失败|cdk\s*(?:invalid|duplicate|already\s*used|not\s*purchased)|无效或未购买|不能重复|已被使用|recharge\s*failed|br\s*recharge\s*failed|payment\s*failed|failed\s*to\s*recharge/.test(text)) {
+    return true;
+  }
+  if (status === 'success' || String(item?.transactionStatus || item?.transaction_status || '').trim().toLowerCase() === 'paid') {
+    return false;
+  }
+  return /failed|失败|rejected|not_found/.test(`${status} ${text}`);
 }
 
 function normalizeExternalRedeemRechargeFailureItem(item = {}) {
@@ -9117,6 +9124,40 @@ function dedupeExternalRedeemPendingQueueByCdkey(queue = []) {
     deduped.push(item);
   }
   return deduped;
+}
+
+function getExternalRedeemTaskId(item = {}) {
+  return String(item?.taskId || item?.task_id || '').trim();
+}
+
+function countExternalRedeemPendingKeys(queue = [], getter = () => '') {
+  const counts = new Map();
+  for (const item of Array.isArray(queue) ? queue : []) {
+    const key = String(getter(item) || '').trim();
+    if (!key) {
+      continue;
+    }
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function getExternalRedeemStatusUpdateForQueueItem(item = {}, context = {}) {
+  const cdkey = normalizeExternalRedeemCdkey(item?.cdkey);
+  const taskId = getExternalRedeemTaskId(item);
+  const {
+    byTaskId = new Map(),
+    byCdkey = new Map(),
+    pendingTaskIdCounts = new Map(),
+    pendingCdkeyCounts = new Map(),
+  } = context || {};
+  if (taskId && pendingTaskIdCounts.get(taskId) === 1 && byTaskId.has(taskId)) {
+    return byTaskId.get(taskId);
+  }
+  if (cdkey && pendingCdkeyCounts.get(cdkey) === 1 && byCdkey.has(cdkey)) {
+    return byCdkey.get(cdkey);
+  }
+  return null;
 }
 
 function getExternalRedeemCdkeysFromText(text = '') {
@@ -10272,24 +10313,37 @@ function normalizeExternalRedeemSubmitItem(item = {}, context = {}) {
 
 function normalizeExternalRedeemStatusItem(item = {}, previous = {}) {
   const status = String(item?.status || previous?.status || '').trim().toLowerCase();
+  const transactionStatus = String(item?.transaction_status || previous?.transactionStatus || '').trim();
+  const displayStatus = String(item?.display_status || previous?.displayStatus || status || '').trim();
+  const isSuccessUpdate = status === 'success'
+    || transactionStatus.toLowerCase() === 'paid'
+    || /充值成功|兑换成功|success/i.test(displayStatus);
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(item, key);
+  const reason = hasOwn('reason')
+    ? String(item?.reason || '').trim()
+    : (isSuccessUpdate ? '' : String(previous?.reason || '').trim());
+  const errorMessage = hasOwn('error_message')
+    ? String(item?.error_message || '').trim()
+    : (isSuccessUpdate ? '' : String(previous?.errorMessage || '').trim());
   return normalizeExternalRedeemRechargeFailureItem({
     ...previous,
     taskId: String(item?.task_id || previous?.taskId || '').trim(),
     status,
-    displayStatus: String(item?.display_status || previous?.displayStatus || status || '').trim(),
-    reason: String(item?.reason || previous?.reason || '').trim(),
+    displayStatus,
+    reason,
     transactionId: String(item?.transaction_id || previous?.transactionId || '').trim(),
-    transactionStatus: String(item?.transaction_status || previous?.transactionStatus || '').trim(),
+    transactionStatus,
     found: item?.found !== false,
     updatedAt: item?.updated_at || previous?.updatedAt || new Date().toISOString(),
     finishedAt: item?.finished_at || previous?.finishedAt || '',
+    errorMessage,
     lastCheckedAt: Date.now(),
   });
 }
 
 function isExternalRedeemQueueItemSuccessfulForFlow(item = {}) {
   const status = String(item?.status || '').trim().toLowerCase();
-  return status === 'success';
+  return status === 'success' && !hasExternalRedeemRechargeFailureSignal(item);
 }
 
 function isExternalRedeemQueueItemPendingForFlow(item = {}) {
@@ -10335,8 +10389,9 @@ function findExternalRedeemQueueItemForFlow(queueOrState = {}, target = {}) {
     const itemTaskId = String(item?.taskId || item?.task_id || '').trim();
     const itemCdkey = normalizeExternalRedeemCdkey(item?.cdkey || '');
     const itemEmail = String(item?.email || '').trim().toLowerCase();
-    if (targetId && itemId === targetId) return true;
-    if (targetTaskId && itemTaskId === targetTaskId) return true;
+    const emailMatches = !targetEmail || itemEmail === targetEmail;
+    if (targetId && itemId === targetId) return emailMatches;
+    if (targetTaskId && itemTaskId === targetTaskId) return emailMatches;
     return Boolean(targetCdkey && itemCdkey === targetCdkey && (!targetEmail || itemEmail === targetEmail));
   }) || null;
 }
@@ -11243,13 +11298,31 @@ async function pollExternalRedeemQueue(trigger = 'alarm', options = {}) {
   try {
     const response = await fetchExternalRedeemApi('/api/external/cdkey-redeems/status', { cdkeys }, { state });
     const items = Array.isArray(response?.data?.items) ? response.data.items : [];
-    const byCdkey = new Map(items.map((item) => [normalizeExternalRedeemCdkey(item?.cdkey), item]));
+    const byCdkey = new Map();
+    const byTaskId = new Map();
+    for (const item of items) {
+      const itemCdkey = normalizeExternalRedeemCdkey(item?.cdkey);
+      const itemTaskId = getExternalRedeemTaskId(item);
+      if (itemCdkey && !byCdkey.has(itemCdkey)) {
+        byCdkey.set(itemCdkey, item);
+      }
+      if (itemTaskId && !byTaskId.has(itemTaskId)) {
+        byTaskId.set(itemTaskId, item);
+      }
+    }
+    const pendingCdkeyCounts = countExternalRedeemPendingKeys(pending, (item) => normalizeExternalRedeemCdkey(item?.cdkey));
+    const pendingTaskIdCounts = countExternalRedeemPendingKeys(pending, getExternalRedeemTaskId);
     const nextQueue = queue.map((item) => {
-      const cdkey = normalizeExternalRedeemCdkey(item?.cdkey);
-      if (!byCdkey.has(cdkey)) {
+      const statusItem = getExternalRedeemStatusUpdateForQueueItem(item, {
+        byTaskId,
+        byCdkey,
+        pendingTaskIdCounts,
+        pendingCdkeyCounts,
+      });
+      if (!statusItem) {
         return item;
       }
-      return normalizeExternalRedeemStatusItem(byCdkey.get(cdkey), item);
+      return normalizeExternalRedeemStatusItem(statusItem, item);
     });
     const updates = {
       externalRedeemQueue: nextQueue,
