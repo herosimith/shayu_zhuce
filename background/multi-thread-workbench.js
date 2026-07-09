@@ -44,11 +44,18 @@
       const entries = Array.isArray(state?.customEmailPoolEntries)
         ? state.customEmailPoolEntries
         : [];
+      const reuseAllowedEmails = new Set(
+        entries
+          .filter((entry) => entry?.reuseAllowed === true)
+          .map((entry) => normalizeEmail(entry?.email))
+          .filter(Boolean)
+      );
       const redeemUsedEmails = new Set(
         (Array.isArray(state?.externalRedeemQueue) ? state.externalRedeemQueue : [])
           .map((item) => normalizeEmail(item?.email))
           .filter(Boolean)
       );
+      reuseAllowedEmails.forEach((email) => redeemUsedEmails.delete(email));
       return entries
         .filter((entry) => entry && typeof entry === 'object')
         .filter((entry) => entry.enabled !== false)

@@ -579,6 +579,18 @@
       : [];
   }
 
+  function getEmailPoolReuseAllowedSet() {
+    const allowedEmails = new Set();
+    (Array.isArray(state?.customEmailPoolEntries) ? state.customEmailPoolEntries : [])
+      .forEach((entry) => {
+        const email = normalizeEmail(entry?.email).toLowerCase();
+        if (email && entry?.reuseAllowed === true) {
+          allowedEmails.add(email);
+        }
+      });
+    return allowedEmails;
+  }
+
   function getExternalRedeemUsedEmailSet() {
     const usedEmails = new Set();
     getExternalRedeemQueue().forEach((item) => {
@@ -596,6 +608,7 @@
         usedEmails.add(email);
       }
     });
+    getEmailPoolReuseAllowedSet().forEach((email) => usedEmails.delete(email));
     return usedEmails;
   }
 
@@ -1050,6 +1063,7 @@
         clientId: normalizedApiMode === ICLOUD_API_MODE_HOTMAIL ? normalizedClientId : '',
         refreshToken: normalizedApiMode === ICLOUD_API_MODE_HOTMAIL ? normalizedRefreshToken : '',
         verificationUrl: normalizedApiMode === ICLOUD_API_MODE_HOTMAIL ? '' : normalizedVerificationUrl,
+        reuseAllowed: Boolean(previous.reuseAllowed),
         lastUsedAt: Number(previous.lastUsedAt) || 0,
         lastError: String(previous.lastError || '').trim(),
         accessTokenCheck: previous.accessTokenCheck || null,
@@ -1104,13 +1118,20 @@
     const redeemUsedEmails = getExternalRedeemUsedEmailSet();
     const parsed = parsePoolText(els.emailPool.value, { mode: getSelectedIcloudApiMode() });
     if (parsed.length) {
-      return parsed.map((entry) => ({
-        ...entry,
-        used: Boolean(entry.used) || redeemUsedEmails.has(normalizeEmail(entry.email).toLowerCase()),
-        lastUsedAt: Boolean(entry.used) || redeemUsedEmails.has(normalizeEmail(entry.email).toLowerCase())
-          ? (Number(entry.lastUsedAt) || Date.now())
-          : (Number(entry.lastUsedAt) || 0),
-      }));
+      return parsed.map((entry) => {
+        const emailKey = normalizeEmail(entry.email).toLowerCase();
+        const reuseAllowed = Boolean(entry.reuseAllowed);
+        const usedByRedeem = !reuseAllowed && redeemUsedEmails.has(emailKey);
+        const used = Boolean(entry.used) || usedByRedeem;
+        return {
+          ...entry,
+          reuseAllowed,
+          used,
+          lastUsedAt: used
+            ? (Number(entry.lastUsedAt) || Date.now())
+            : (Number(entry.lastUsedAt) || 0),
+        };
+      });
     }
     if (
       String(els.emailPool.value || '').trim() === ''
@@ -1130,12 +1151,16 @@
         const apiMode = normalizeIcloudApiMode(entry?.apiMode || (entry?.clientId && entry?.refreshToken ? ICLOUD_API_MODE_HOTMAIL : (entry?.queryCode ? ICLOUD_API_MODE_TAOBAO : '')));
         const password = String(entry?.password || '').trim();
         const queryCode = apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : String(entry?.queryCode || '').trim();
+        const reuseAllowed = Boolean(entry?.reuseAllowed);
+        const usedByRedeem = !reuseAllowed && redeemUsedEmails.has(email.toLowerCase());
+        const used = Boolean(entry?.used) || usedByRedeem;
         return {
           ...entry,
           id: String(entry?.id || makeEntryId(entry?.email, index)).trim(),
           email,
           enabled: entry?.enabled !== false,
-          used: Boolean(entry?.used) || redeemUsedEmails.has(email.toLowerCase()),
+          used,
+          reuseAllowed,
           apiMode,
           queryCode,
           password: apiMode === ICLOUD_API_MODE_HOTMAIL || apiMode === ICLOUD_API_MODE_OUTLOOK_API ? password : '',
@@ -1148,7 +1173,7 @@
             || (apiMode === ICLOUD_API_MODE_OUTLOOK_API && password ? buildOutlookApiVerificationUrl(email, password) : '')
             || (apiMode === ICLOUD_API_MODE_TAOBAO && queryCode ? buildTaobaoVerificationUrl(email, queryCode) : '')
           ),
-          lastUsedAt: Boolean(entry?.used) || redeemUsedEmails.has(email.toLowerCase())
+          lastUsedAt: used
             ? (Number(entry?.lastUsedAt) || Date.now())
             : 0,
           lastError: String(entry?.lastError || '').trim(),
@@ -1487,7 +1512,10 @@
     const unused = entries.filter((entry) => (
       entry.enabled
       && !entry.used
-      && !redeemUsedEmails.has(normalizeEmail(entry.email).toLowerCase())
+      && (
+        Boolean(entry.reuseAllowed)
+        || !redeemUsedEmails.has(normalizeEmail(entry.email).toLowerCase())
+      )
     )).length;
     els.poolSummary.textContent = `${total} 个邮箱 / ${enabled} 个启用 / ${unused} 个未用`;
     if (Number(els.runCount.value || 1) < 1) {
@@ -1505,7 +1533,8 @@
     const records = getChatGptAcRecords();
     els.poolList.innerHTML = entries.map((entry, index) => {
       const emailKey = normalizeEmail(entry.email).toLowerCase();
-      const usedByRedeem = redeemUsedEmails.has(emailKey);
+      const reuseAllowed = Boolean(entry.reuseAllowed);
+      const usedByRedeem = !reuseAllowed && redeemUsedEmails.has(emailKey);
       const isUsed = Boolean(entry.used) || usedByRedeem;
       const status = isUsed ? '已用' : '未用';
       const statusClass = isUsed ? 'skipped' : 'success';
@@ -1533,12 +1562,15 @@
         <div class="pool-item">
           <div class="pool-head">
             <strong class="pool-email">${index + 1}. ${htmlEscape(entry.email)}</strong>
-            <span class="badge ${statusClass}">${status}</span>
+            <div class="pool-actions">
+              <span class="badge ${statusClass}">${status}</span>
+              ${isUsed ? `<button class="btn small ghost" type="button" data-reset-pool-email="${htmlEscape(emailKey)}">重置</button>` : ''}
+            </div>
           </div>
           <div class="pool-url">${htmlEscape(fullLine)}</div>
           <div class="pool-meta">${htmlEscape(modeLabel)}${url ? ` / 接口：${htmlEscape(url)}` : ''}${htmlEscape(hotmailMeta)}</div>
           ${acMeta}
-          <div class="pool-meta">${usedByRedeem ? '已参与外部兑换，按已用处理。' : '邮箱池会按未用邮箱顺序轮询，成功后自动标记已用。'}</div>
+          <div class="pool-meta">${reuseAllowed ? '已重置为未用，可重新参与轮询。' : (usedByRedeem ? '已参与外部兑换，按已用处理。' : '邮箱池会按未用邮箱顺序轮询，成功后自动标记已用。')}</div>
         </div>
       `;
     }).join('');
@@ -3077,6 +3109,7 @@
     const entries = getPoolEntriesFromInput().map((entry) => ({
       ...entry,
       used: false,
+      reuseAllowed: true,
       lastUsedAt: 0,
       lastError: '',
     }));
@@ -3095,6 +3128,48 @@
     state = response?.state || state;
     renderState();
     showToast('已清空邮箱已用状态', 'success');
+  }
+
+  async function resetPoolEntryUsed(emailValue = '') {
+    const targetEmail = normalizeEmail(emailValue).toLowerCase();
+    if (!targetEmail) {
+      throw new Error('未找到要重置的邮箱。');
+    }
+    let matched = false;
+    const entries = getPoolEntriesFromInput().map((entry) => {
+      const email = normalizeEmail(entry?.email).toLowerCase();
+      if (email !== targetEmail) {
+        return entry;
+      }
+      matched = true;
+      return {
+        ...entry,
+        used: false,
+        reuseAllowed: true,
+        lastUsedAt: 0,
+        lastError: '',
+      };
+    });
+    if (!matched) {
+      throw new Error('邮箱池中未找到该邮箱。');
+    }
+    els.emailPool.value = entriesToText(entries);
+    state = {
+      ...(state || {}),
+      customEmailPoolEntries: entries,
+      customEmailPool: entries
+        .filter((entry) => entry.enabled && !entry.used)
+        .map((entry) => entry.email),
+    };
+    renderPool(entries);
+    const response = await sendMessage({
+      type: 'RESET_CUSTOM_EMAIL_POOL_ENTRY_USED',
+      source: 'sidepanel',
+      payload: { email: targetEmail, entries },
+    }, 20000);
+    state = response?.state || state;
+    renderState();
+    showToast(`已重置 ${targetEmail} 为未用`, 'success');
   }
 
   async function clearPoolAll() {
@@ -3202,6 +3277,16 @@
   els.clearUsed.addEventListener('click', () => {
     clearUsedFlags().catch((error) => showToast(error.message, 'error'));
   });
+  if (els.poolList) {
+    els.poolList.addEventListener('click', (event) => {
+      const button = event.target?.closest?.('button[data-reset-pool-email]');
+      if (!button) {
+        return;
+      }
+      resetPoolEntryUsed(button.dataset.resetPoolEmail || '')
+        .catch((error) => showToast(error.message || '重置邮箱失败', 'error', 6200));
+    });
+  }
   els.clearPoolAll.addEventListener('click', () => {
     clearPoolAll().catch((error) => showToast(error.message, 'error'));
   });

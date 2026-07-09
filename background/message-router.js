@@ -241,7 +241,7 @@
       preserveKeyFromState(updates, currentState, 'phonePreferredActivation');
     }
 
-    function normalizeCustomEmailPoolEntriesForClear(payloadEntries = [], currentState = {}) {
+    function normalizeCustomEmailPoolEntriesForClear(payloadEntries = [], currentState = {}, options = {}) {
       const sourceEntries = Array.isArray(payloadEntries) && payloadEntries.length > 0
         ? payloadEntries
         : (Array.isArray(currentState?.customEmailPoolEntries) ? currentState.customEmailPoolEntries : []);
@@ -249,6 +249,7 @@
       const entries = sourceEntries.length > 0
         ? sourceEntries
         : legacyPool.map((email) => ({ email }));
+      const targetEmail = String(options?.targetEmail || '').trim().toLowerCase();
       const seen = new Set();
       return entries.map((entry, index) => {
         const rawEntry = entry && typeof entry === 'object' ? entry : { email: entry };
@@ -257,19 +258,32 @@
           return null;
         }
         seen.add(email);
+        const shouldReset = !targetEmail || email === targetEmail;
+        const rawApiMode = String(rawEntry.apiMode || '').trim().toLowerCase();
+        const password = String(rawEntry.password || '').trim();
+        const clientId = String(rawEntry.clientId || rawEntry.client_id || '').trim();
+        const refreshToken = String(rawEntry.refreshToken || rawEntry.refresh_token || rawEntry.token || '').trim();
+        const queryCode = clientId && refreshToken
+          ? ''
+          : String(rawEntry.queryCode || rawEntry.pwd || (rawApiMode === 'taobao' ? rawEntry.password : '') || '').trim();
+        const apiMode = clientId && refreshToken
+          ? 'hotmail'
+          : (rawApiMode || (queryCode ? 'taobao' : 'normal'));
         return {
           id: String(rawEntry.id || `custom-pool-${Date.now()}-${index}`).trim(),
           email,
           enabled: rawEntry.enabled !== false,
-          used: false,
+          used: shouldReset ? false : Boolean(rawEntry.used),
           note: String(rawEntry.note || '').trim(),
-          queryCode: String(rawEntry.queryCode || rawEntry.pwd || rawEntry.password || '').trim(),
-          apiMode: String(rawEntry.queryCode || rawEntry.pwd || rawEntry.password || '').trim()
-            ? 'taobao'
-            : (String(rawEntry.apiMode || '').trim().toLowerCase() === 'taobao' ? 'taobao' : 'normal'),
+          queryCode: apiMode === 'hotmail' ? '' : queryCode,
+          apiMode,
+          password: apiMode === 'hotmail' || apiMode === 'outlook-api' ? password : '',
+          clientId: apiMode === 'hotmail' ? clientId : '',
+          refreshToken: apiMode === 'hotmail' ? refreshToken : '',
           verificationUrl: String(rawEntry.verificationUrl || rawEntry.url || rawEntry.mailUrl || '').trim(),
-          lastUsedAt: 0,
-          lastError: '',
+          reuseAllowed: shouldReset ? true : Boolean(rawEntry.reuseAllowed),
+          lastUsedAt: shouldReset ? 0 : (Number(rawEntry.lastUsedAt) || 0),
+          lastError: shouldReset ? '' : String(rawEntry.lastError || '').trim(),
           accessTokenCheck: rawEntry.accessTokenCheck && typeof rawEntry.accessTokenCheck === 'object'
             ? rawEntry.accessTokenCheck
             : null,
@@ -1793,7 +1807,7 @@
           const currentState = await getState();
           const entries = normalizeCustomEmailPoolEntriesForClear(message.payload?.entries, currentState);
           const customEmailPool = entries
-            .filter((entry) => entry.enabled)
+            .filter((entry) => entry.enabled && !entry.used)
             .map((entry) => entry.email);
           const updates = {
             customEmailPoolEntries: entries,
@@ -1805,6 +1819,38 @@
             broadcastDataUpdate(updates);
           }
           await addLog(`iCloud API 邮箱池：已清空 ${entries.length} 个邮箱的已用状态。`, 'ok');
+          return {
+            ok: true,
+            state: await getState(),
+          };
+        }
+
+        case 'RESET_CUSTOM_EMAIL_POOL_ENTRY_USED': {
+          const currentState = await getState();
+          const targetEmail = String(message.payload?.email || '').trim().toLowerCase();
+          if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+            throw new Error('未提供要重置的邮箱。');
+          }
+          const entries = normalizeCustomEmailPoolEntriesForClear(message.payload?.entries, currentState, {
+            targetEmail,
+          });
+          const matched = entries.some((entry) => entry.email === targetEmail);
+          if (!matched) {
+            throw new Error('邮箱池中未找到该邮箱。');
+          }
+          const customEmailPool = entries
+            .filter((entry) => entry.enabled && !entry.used)
+            .map((entry) => entry.email);
+          const updates = {
+            customEmailPoolEntries: entries,
+            customEmailPool,
+          };
+          await setPersistentSettings(updates);
+          await setState(updates);
+          if (typeof broadcastDataUpdate === 'function') {
+            broadcastDataUpdate(updates);
+          }
+          await addLog(`iCloud API 邮箱池：已重置 ${targetEmail} 为未用。`, 'ok');
           return {
             ok: true,
             state: await getState(),

@@ -327,6 +327,13 @@ textarea {
   gap: 8px;
 }
 
+.pool-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .thread-logs-grid {
   display: grid;
   grid-auto-columns: minmax(220px, 1fr);

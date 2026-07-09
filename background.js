@@ -2506,6 +2506,7 @@ function normalizeCustomEmailPoolEntryObjects(value = []) {
       clientId: apiMode === ICLOUD_API_MODE_HOTMAIL ? clientId : '',
       refreshToken: apiMode === ICLOUD_API_MODE_HOTMAIL ? refreshToken : '',
       verificationUrl: apiMode === ICLOUD_API_MODE_HOTMAIL ? '' : verificationUrl,
+      reuseAllowed: Boolean(asObject.reuseAllowed),
       lastUsedAt: Number.isFinite(Number(asObject.lastUsedAt)) ? Number(asObject.lastUsedAt) : 0,
       lastError: String(asObject.lastError || '').trim(),
       accessTokenCheck: asObject.accessTokenCheck && typeof asObject.accessTokenCheck === 'object'
@@ -2582,6 +2583,7 @@ async function markCurrentCustomEmailPoolEntryUsed(state = {}, options = {}) {
     return {
       ...entry,
       used: true,
+      reuseAllowed: false,
       lastUsedAt: now,
     };
   });
@@ -2640,6 +2642,7 @@ async function markCustomEmailPoolEntryUsedByEmail(emailValue = '', options = {}
     return {
       ...entry,
       used: true,
+      reuseAllowed: false,
       lastUsedAt: Number(entry.lastUsedAt) || now,
     };
   });
